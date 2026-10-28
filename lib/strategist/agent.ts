@@ -1,7 +1,7 @@
-import Anthropic from "@anthropic-ai/sdk";
+import type { Part } from "@google/genai";
 import type { Captain } from "../auth.ts";
 import { createChat, loadMessages, saveMessages, type Message } from "../chats.ts";
-import { claude, FALLBACK, MODEL } from "../claude.ts";
+import { gemini, MODEL } from "../gemini.ts";
 import { runTool, toolDefinitions, toolStatus } from "./tools.ts";
 import type { ChatEvent, TranscriptItem } from "./view.ts";
 
@@ -30,42 +30,45 @@ export async function runStrategist(captain: Captain, chatId: number | null, tex
   if (!messages) throw new Error("Chat not found.");
   emit({ type: "chat", id });
 
-  messages.push({ role: "user", content: text });
+  messages.push({ role: "user", parts: [{ text }] });
   saveMessages(id, messages);
 
   const context = `Captain: ${captain.name}. Team: ${captain.teamName}. Today: ${new Date().toDateString()}.`;
 
   for (let step = 0; step < MAX_STEPS; step++) {
-    const stream = claude().beta.messages.stream({
-      ...FALLBACK,
+    const stream = await gemini().models.generateContentStream({
       model: MODEL,
-      max_tokens: 64000,
-      output_config: { effort: "medium" },
-      cache_control: { type: "ephemeral" },
-      system: [{ type: "text", text: SYSTEM }, { type: "text", text: context }],
-      tools: toolDefinitions,
-      messages,
+      contents: messages,
+      config: {
+        systemInstruction: `${SYSTEM}\n\n${context}`,
+        tools: [{ functionDeclarations: toolDefinitions }],
+      },
     });
-    stream.on("text", (delta) => emit({ type: "text", delta }));
 
-    const message = await stream.finalMessage();
-    messages.push({ role: "assistant", content: message.content });
-    saveMessages(id, messages);
-
-    if (message.stop_reason === "pause_turn") continue;
-    if (message.stop_reason === "refusal") {
-      emit({ type: "error", message: "The strategist couldn't help with that one." });
+    // Keep every part as returned (thought signatures included); Gemini needs them back on the next turn.
+    const parts: Part[] = [];
+    for await (const chunk of stream) {
+      for (const part of chunk.candidates?.[0]?.content?.parts ?? []) {
+        if (part.text && !part.thought) emit({ type: "text", delta: part.text });
+        parts.push(part);
+      }
+    }
+    if (parts.length === 0) {
+      emit({ type: "error", message: "The strategist couldn't answer that one. Try rephrasing." });
       break;
     }
-    const toolUses = message.content.filter((b): b is Anthropic.Beta.BetaToolUseBlock => b.type === "tool_use");
-    if (message.stop_reason !== "tool_use" || toolUses.length === 0) break;
+    messages.push({ role: "model", parts });
+    saveMessages(id, messages);
 
-    const results: Anthropic.Beta.BetaToolResultBlockParam[] = toolUses.map((use) => {
-      emit({ type: "status", label: toolStatus(use.name) });
-      const { content, isError } = runTool(use.name, use.input, captain);
-      return { type: "tool_result", tool_use_id: use.id, content, is_error: isError };
+    const calls = parts.flatMap((p) => (p.functionCall ? [p.functionCall] : []));
+    if (calls.length === 0) break;
+
+    const responses: Part[] = calls.map((call) => {
+      const name = call.name ?? "";
+      emit({ type: "status", label: toolStatus(name) });
+      return { functionResponse: { id: call.id, name, response: runTool(name, call.args, captain) } };
     });
-    messages.push({ role: "user", content: results });
+    messages.push({ role: "user", parts: responses });
     saveMessages(id, messages);
   }
 
@@ -76,12 +79,9 @@ export async function runStrategist(captain: Captain, chatId: number | null, tex
 export function transcript(messages: Message[]): TranscriptItem[] {
   const items: TranscriptItem[] = [];
   for (const m of messages) {
-    const text =
-      typeof m.content === "string"
-        ? m.content
-        : (m.content ?? []).flatMap((b) => (b.type === "text" ? [b.text] : [])).join("\n\n");
+    const text = (m.parts ?? []).flatMap((p) => (p.text && !p.thought ? [p.text] : [])).join("");
     if (!text) continue;
-    const role = m.role === "user" ? "captain" : "ai";
+    const role = m.role === "model" ? "ai" : "captain";
     const last = items.at(-1);
     if (last?.role === "ai" && role === "ai") last.text += `\n\n${text}`;
     else items.push({ role, text });

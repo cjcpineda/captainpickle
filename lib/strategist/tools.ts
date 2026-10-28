@@ -1,5 +1,5 @@
 /** The league database, as tools the strategist can call. Every number it quotes comes from here. */
-import type Anthropic from "@anthropic-ai/sdk";
+import type { FunctionDeclaration } from "@google/genai";
 import { z } from "zod";
 import type { Captain } from "../auth.ts";
 import { leagueToday, lineupDeadline } from "../deadline.ts";
@@ -97,29 +97,24 @@ const TOOLS = {
 
 type ToolName = keyof typeof TOOLS;
 
-export const toolDefinitions: Anthropic.Beta.BetaTool[] = Object.entries(TOOLS).map(([name, t]) => {
+export const toolDefinitions: FunctionDeclaration[] = Object.entries(TOOLS).map(([name, t]) => {
   const { $schema, ...schema } = z.toJSONSchema(t.input) as Record<string, unknown>;
-  return {
-    name,
-    description: t.description,
-    input_schema: schema as Anthropic.Beta.BetaTool.InputSchema,
-    eager_input_streaming: true,
-  };
+  return { name, description: t.description, parametersJsonSchema: schema };
 });
 
 export function toolStatus(name: string): string {
   return TOOLS[name as ToolName]?.status ?? "Working";
 }
 
-/** Validates the model's input against the tool's schema before running it. */
-export function runTool(name: string, input: unknown, captain: Captain): { content: string; isError: boolean } {
+/** Validates the model's arguments against the tool's schema before running it. */
+export function runTool(name: string, input: unknown, captain: Captain): { output: unknown } | { error: string } {
   const t = TOOLS[name as ToolName] as Tool<z.ZodType> | undefined;
-  if (!t) return { content: `Unknown tool ${name}`, isError: true };
-  const parsed = t.input.safeParse(input);
-  if (!parsed.success) return { content: `Invalid input: ${parsed.error.message}`, isError: true };
+  if (!t) return { error: `Unknown tool ${name}` };
+  const parsed = t.input.safeParse(input ?? {});
+  if (!parsed.success) return { error: `Invalid input: ${parsed.error.message}` };
   try {
-    return { content: JSON.stringify(t.run(parsed.data, captain)), isError: false };
+    return { output: t.run(parsed.data, captain) };
   } catch (err) {
-    return { content: err instanceof Error ? err.message : String(err), isError: true };
+    return { error: err instanceof Error ? err.message : String(err) };
   }
 }
