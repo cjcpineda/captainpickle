@@ -1,6 +1,6 @@
-import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import { currentCaptain } from "@/lib/auth.ts";
+import { describeAiError } from "@/lib/gemini.ts";
 import { runStrategist } from "@/lib/strategist/agent.ts";
 import type { ChatEvent } from "@/lib/strategist/view.ts";
 
@@ -21,7 +21,7 @@ export async function POST(request: Request) {
         await runStrategist(captain, body.data.chatId, body.data.message, emit);
       } catch (err) {
         console.error(err);
-        emit({ type: "error", message: describe(err) });
+        emit({ type: "error", message: describeAiError(err) });
       } finally {
         controller.close();
       }
@@ -29,12 +29,4 @@ export async function POST(request: Request) {
   });
 
   return new Response(stream, { headers: { "Content-Type": "application/x-ndjson", "Cache-Control": "no-store" } });
-}
-
-function describe(err: unknown): string {
-  if (err instanceof Anthropic.AuthenticationError) return "The AI service isn't configured. Set ANTHROPIC_API_KEY.";
-  if (err instanceof Anthropic.RateLimitError) return "The AI service is busy. Try again in a moment.";
-  if (err instanceof Anthropic.APIError) return "The AI service had a problem. Try again.";
-  if (err instanceof Anthropic.AnthropicError) return "Couldn't reach the AI service. Check ANTHROPIC_API_KEY.";
-  return "Something went wrong. Try again.";
 }

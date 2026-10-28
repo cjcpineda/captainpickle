@@ -6,7 +6,7 @@ const display = Barlow_Condensed({ subsets: ["latin"], weight: ["600", "700"], s
 const body = Inter({ subsets: ["latin"], variable: "--font-body" });
 
 export const metadata: Metadata = {
-  title: "Captain Pickle",
+  title: "League Captain",
   description: "AI lineup strategist for Cross Club Pickleball captains",
 };
 

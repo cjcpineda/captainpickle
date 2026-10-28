@@ -1,7 +1,7 @@
-import type Anthropic from "@anthropic-ai/sdk";
+import type { Content } from "@google/genai";
 import { db } from "./db.ts";
 
-export type Message = Anthropic.Beta.BetaMessageParam;
+export type Message = Content;
 export type ChatSummary = { id: number; title: string; updatedAt: string };
 
 export function listChats(captainId: number): ChatSummary[] {
@@ -19,11 +19,19 @@ export function loadMessages(captainId: number, chatId: number): Message[] | nul
   const row = db().prepare("SELECT messages FROM chats WHERE id = ? AND captain_id = ?").get(chatId, captainId) as
     | { messages: string }
     | undefined;
-  return row ? JSON.parse(row.messages) : null;
+  return row ? (JSON.parse(row.messages) as unknown[]).flatMap(upgradeLegacy) : null;
 }
 
 export function saveMessages(chatId: number, messages: Message[]) {
   db()
     .prepare("UPDATE chats SET messages = ?, updated_at = datetime('now') WHERE id = ?")
     .run(JSON.stringify(messages), chatId);
+}
+
+/** Chats saved before the switch to Gemini used { role, content }; keep their plain-text turns. */
+function upgradeLegacy(m: unknown): Message[] {
+  const legacy = m as { role?: string; content?: unknown; parts?: unknown };
+  if (legacy.parts) return [m as Message];
+  if (typeof legacy.content !== "string") return [];
+  return [{ role: legacy.role === "assistant" ? "model" : "user", parts: [{ text: legacy.content }] }];
 }

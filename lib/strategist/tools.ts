@@ -1,7 +1,9 @@
 /** The league database, as tools the strategist can call. Every number it quotes comes from here. */
-import type Anthropic from "@anthropic-ai/sdk";
+import type { FunctionDeclaration } from "@google/genai";
 import { z } from "zod";
 import type { Captain } from "../auth.ts";
+import { leagueToday, lineupDeadline } from "../deadline.ts";
+import { pairRecords, scoutingReport } from "../scouting.ts";
 import {
   findPlayer,
   findTeam,
@@ -22,16 +24,19 @@ type Tool<S extends z.ZodType> = {
 
 const tool = <S extends z.ZodType>(t: Tool<S>) => t;
 
-const today = () => new Date().toISOString().slice(0, 10);
-
 const TOOLS = {
   get_schedule: tool({
-    description: "Our team's upcoming matches and past league results (games won-lost per match).",
+    description:
+      "Our team's upcoming matches (date, start time, home/away, division, location, lineup deadline) " +
+      "and past league results (games won-lost per match).",
     status: "Checking the schedule",
     input: z.object({}),
     run: (_, captain) => ({
       team: captain.teamName,
-      upcoming: upcomingFixtures(captain.teamId, today()),
+      upcoming: upcomingFixtures(captain.teamId, leagueToday()).map((f) => ({
+        ...f,
+        lineupDeadline: lineupDeadline(f.playOn, f.isHome),
+      })),
       results: results(captain.teamId),
     }),
   }),
@@ -61,6 +66,28 @@ const TOOLS = {
     },
   }),
 
+  get_scouting_report: tool({
+    description:
+      "Scouting report on a team: roster with each player's record and point differential, every pair they've used " +
+      "(most frequent first, with format and record), and their strongest players by win rate.",
+    status: "Scouting the opponent",
+    input: z.object({ team: z.string() }),
+    run: ({ team }) => {
+      const found = findTeam(team);
+      if (!found) return { error: `No team matching "${team}".`, teams: listTeams().map((t) => t.name) };
+      return scoutingReport(found.id);
+    },
+  }),
+
+  get_pair_records: tool({
+    description:
+      "Every pair our team has used, with league and practice results reported separately " +
+      "(games, wins, point differential). Use it to find our best pairs and how they've done together.",
+    status: "Comparing our pairs",
+    input: z.object({}),
+    run: (_, captain) => pairRecords(captain.teamId),
+  }),
+
   get_player_games: tool({
     description: "Every game on file for one player (league and practice): date, partner, opponents, score, result.",
     status: "Looking up player history",
@@ -79,29 +106,24 @@ const TOOLS = {
 
 type ToolName = keyof typeof TOOLS;
 
-export const toolDefinitions: Anthropic.Beta.BetaTool[] = Object.entries(TOOLS).map(([name, t]) => {
+export const toolDefinitions: FunctionDeclaration[] = Object.entries(TOOLS).map(([name, t]) => {
   const { $schema, ...schema } = z.toJSONSchema(t.input) as Record<string, unknown>;
-  return {
-    name,
-    description: t.description,
-    input_schema: schema as Anthropic.Beta.BetaTool.InputSchema,
-    eager_input_streaming: true,
-  };
+  return { name, description: t.description, parametersJsonSchema: schema };
 });
 
 export function toolStatus(name: string): string {
   return TOOLS[name as ToolName]?.status ?? "Working";
 }
 
-/** Validates the model's input against the tool's schema before running it. */
-export function runTool(name: string, input: unknown, captain: Captain): { content: string; isError: boolean } {
+/** Validates the model's arguments against the tool's schema before running it. */
+export function runTool(name: string, input: unknown, captain: Captain): { output: unknown } | { error: string } {
   const t = TOOLS[name as ToolName] as Tool<z.ZodType> | undefined;
-  if (!t) return { content: `Unknown tool ${name}`, isError: true };
-  const parsed = t.input.safeParse(input);
-  if (!parsed.success) return { content: `Invalid input: ${parsed.error.message}`, isError: true };
+  if (!t) return { error: `Unknown tool ${name}` };
+  const parsed = t.input.safeParse(input ?? {});
+  if (!parsed.success) return { error: `Invalid input: ${parsed.error.message}` };
   try {
-    return { content: JSON.stringify(t.run(parsed.data, captain)), isError: false };
+    return { output: t.run(parsed.data, captain) };
   } catch (err) {
-    return { content: err instanceof Error ? err.message : String(err), isError: true };
+    return { error: err instanceof Error ? err.message : String(err) };
   }
 }
