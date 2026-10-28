@@ -22,6 +22,7 @@ export type Result = {
   matchId: number;
   playedOn: string;
   opponent: string;
+  isHome: boolean;
   gamesWon: number;
   gamesLost: number;
 };
@@ -40,6 +41,7 @@ export type MatchInput = {
   home: string;
   away: string;
   source: string;
+  cplId?: string;
   players: { name: string; team: string; gender: Gender | null }[];
   games: { round: number | null; a: [string, string]; b: [string, string]; scoreA: number; scoreB: number }[];
 };
@@ -55,7 +57,7 @@ export function upsertPlayer(name: string, teamId: number, gender: Gender | null
   conn
     .prepare(
       `INSERT INTO players (name, team_id, gender) VALUES (?, ?, ?)
-       ON CONFLICT (name, team_id) DO UPDATE SET gender = coalesce(players.gender, excluded.gender)`,
+       ON CONFLICT (name, team_id) DO UPDATE SET gender = coalesce(excluded.gender, players.gender)`,
     )
     .run(name.trim(), teamId, gender);
   return (conn.prepare("SELECT id FROM players WHERE name = ? AND team_id = ?").get(name.trim(), teamId) as { id: number }).id;
@@ -70,8 +72,8 @@ export function insertMatch(input: MatchInput): number {
     const id = (name: string) => ids.get(name) ?? upsertPlayer(name, homeId, null);
 
     const { lastInsertRowid } = conn
-      .prepare("INSERT INTO matches (kind, played_on, home_id, away_id, source) VALUES (?, ?, ?, ?, ?)")
-      .run(input.kind, input.playedOn, homeId, awayId, input.source);
+      .prepare("INSERT INTO matches (kind, played_on, home_id, away_id, source, cpl_id) VALUES (?, ?, ?, ?, ?, ?)")
+      .run(input.kind, input.playedOn, homeId, awayId, input.source, input.cplId ?? null);
     const insertGame = conn.prepare(
       "INSERT INTO games (match_id, round, a1, a2, b1, b2, score_a, score_b) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     );
@@ -115,7 +117,35 @@ export function upcomingFixtures(teamId: number, fromDate: string): Fixture[] {
   return rows.map((r) => ({ ...r, isHome: r.isHome === 1 }));
 }
 
-/** Inserts or refreshes a scheduled match (from the CPL schedule or a seed file). */
+export function importedCplIds(): Set<string> {
+  const rows = db().prepare("SELECT cpl_id AS id FROM matches WHERE cpl_id IS NOT NULL").all() as { id: string }[];
+  return new Set(rows.map((r) => r.id));
+}
+
+/**
+ * Drops a hand-entered copy of a match CPL now provides (same two teams, within two days),
+ * so it isn't counted twice.
+ */
+export function deleteManualCopies(home: string, away: string, playedOn: string) {
+  db()
+    .prepare(
+      `DELETE FROM matches WHERE cpl_id IS NULL AND kind = 'league'
+         AND abs(julianday(played_on) - julianday(?)) <= 2
+         AND home_id IN (SELECT id FROM teams WHERE name IN (?, ?))
+         AND away_id IN (SELECT id FROM teams WHERE name IN (?, ?))`,
+    )
+    .run(playedOn, home, away, home, away);
+}
+
+/** Replaces a team's upcoming schedule with the given fixtures, all at once. */
+export function replaceUpcomingFixtures(team: string, fromDate: string, fixtures: FixtureInput[]) {
+  transaction(() => {
+    db().prepare("DELETE FROM fixtures WHERE team_id = ? AND play_on >= ?").run(upsertTeam(team), fromDate);
+    fixtures.forEach(upsertFixture);
+  });
+}
+
+/** Inserts or refreshes a scheduled match. */
 export function upsertFixture(f: FixtureInput) {
   db()
     .prepare(
@@ -130,10 +160,11 @@ export function upsertFixture(f: FixtureInput) {
 
 /** League results from our side of the net: games won and lost per match. */
 export function results(teamId: number): Result[] {
-  return db()
+  const rows = db()
     .prepare(
       `SELECT m.id AS matchId, m.played_on AS playedOn,
               CASE WHEN m.home_id = :team THEN away.name ELSE home.name END AS opponent,
+              m.home_id = :team AS isHome,
               sum(CASE WHEN (g.score_a > g.score_b) = (m.home_id = :team) THEN 1 ELSE 0 END) AS gamesWon,
               sum(CASE WHEN (g.score_a > g.score_b) = (m.home_id = :team) THEN 0 ELSE 1 END) AS gamesLost
        FROM matches m
@@ -143,7 +174,8 @@ export function results(teamId: number): Result[] {
        WHERE m.kind = 'league' AND :team IN (m.home_id, m.away_id)
        GROUP BY m.id ORDER BY m.played_on DESC`,
     )
-    .all({ team: teamId }) as Result[];
+    .all({ team: teamId }) as (Omit<Result, "isHome"> & { isHome: number })[];
+  return rows.map((r) => ({ ...r, isHome: r.isHome === 1 }));
 }
 
 /** Every game of a match, with player names, oriented so `home` is the given team when it played. */

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireCaptain } from "@/lib/auth.ts";
-import { clockTime, longDate, monthDay, weekday } from "@/lib/dates.ts";
+import { lastSyncedAt } from "@/lib/cpl.ts";
+import { clockTime, longDate, monthDay, timeAgo, weekday } from "@/lib/dates.ts";
 import { leagueToday, lineupDeadline } from "@/lib/deadline.ts";
 import { matchGames, results, upcomingFixtures, type Fixture, type Result } from "@/lib/repo.ts";
 
@@ -9,6 +10,7 @@ export default async function SchedulePage() {
   const upcoming = upcomingFixtures(captain.teamId, leagueToday());
   const played = results(captain.teamId);
   const [next] = upcoming;
+  const synced = lastSyncedAt();
 
   return (
     <>
@@ -17,6 +19,7 @@ export default async function SchedulePage() {
           <div className="kicker">Cross Club Pickleball{next?.division && ` · ${next.division}`}</div>
           <h1>{captain.teamName}</h1>
         </div>
+        <span className="sub">{synced ? `Synced from CPL ${timeAgo(synced)}` : "Waiting for first CPL sync"}</span>
       </div>
 
       {next && <NextMatch fixture={next} />}
@@ -28,7 +31,7 @@ export default async function SchedulePage() {
               <h2>Upcoming</h2>
             </div>
             {upcoming.length === 0 ? (
-              <p className="empty">Nothing scheduled.</p>
+              <p className="empty">Nothing scheduled on CPL.</p>
             ) : (
               <ul className="rows">
                 {upcoming.map((f) => (
@@ -133,7 +136,9 @@ function ResultRow({ result, teamId }: { result: Result; teamId: number }) {
         <summary className="row">
           <DateChip iso={result.playedOn} />
           <div>
-            <div className="opponent">vs {result.opponent}</div>
+            <div className="opponent">
+              {result.isHome ? "vs" : "@"} {result.opponent}
+            </div>
             <div className="sub">
               {games.length} games<span className="tap-hint"> · tap for lineups</span>
             </div>

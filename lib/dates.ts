@@ -16,3 +16,14 @@ export function clockTime(hhmm: string): string {
   const [h, m] = hhmm.split(":").map(Number);
   return `${h % 12 || 12}:${String(m).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
 }
+
+/** "3 hours ago", "2 days ago" */
+export function timeAgo(iso: string, now = new Date()): string {
+  const minutes = Math.round((now.getTime() - Date.parse(iso)) / 60_000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  const days = Math.round(hours / 24);
+  return `${days} day${days === 1 ? "" : "s"} ago`;
+}

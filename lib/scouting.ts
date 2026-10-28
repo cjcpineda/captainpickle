@@ -66,6 +66,13 @@ export function scoutingReport(teamId: number): ScoutingReport {
     )
     .all(teamId) as { n1: string; n2: string; g1: Gender | null; g2: Gender | null; games: number; wins: number; pointDiff: number }[];
 
+  const { gamesOnFile } = conn
+    .prepare(
+      `SELECT count(*) AS gamesOnFile FROM games g
+       WHERE EXISTS (SELECT 1 FROM players p WHERE p.team_id = ? AND p.id IN (g.a1, g.a2, g.b1, g.b2))`,
+    )
+    .get(teamId) as { gamesOnFile: number };
+
   const strongest = roster
     .filter((p) => p.games >= MIN_GAMES_TO_RANK)
     .sort((a, b) => b.wins / b.games - a.wins / a.games || b.pointDiff / b.games - a.pointDiff / a.games)
@@ -73,7 +80,7 @@ export function scoutingReport(teamId: number): ScoutingReport {
 
   return {
     team,
-    gamesOnFile: roster.reduce((n, p) => n + p.games, 0) / 2,
+    gamesOnFile,
     roster,
     likelyPairs: pairs.map(({ n1, n2, g1, g2, ...stats }) => ({ players: [n1, n2], format: formatOf(g1, g2), ...stats })),
     strongest,

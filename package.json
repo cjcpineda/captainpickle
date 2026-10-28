@@ -8,9 +8,9 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "seed": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/seed.ts",
     "captain": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/add-captain.ts",
-    "test": "node --test --experimental-strip-types --disable-warning=ExperimentalWarning lib/*.test.ts"
+    "test": "node --test --experimental-strip-types --disable-warning=ExperimentalWarning lib/*.test.ts",
+    "sync": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/sync.ts"
   },
   "engines": {
     "node": ">=22.13"

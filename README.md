@@ -14,10 +14,11 @@ CPL lineup deadlines: away teams submit two nights before the match, home teams 
 ```bash
 npm install
 cp .env.example .env.local        # then set GEMINI_API_KEY
-npm run seed                      # loads match sheets from data/seed/
 npm run captain -- you@example.com "CJ Pineda" "Pickleball Kingdom Tinton Falls" <password>
 npm run dev                       # http://localhost:3000
 ```
+
+The server pulls your schedule and match history from CPL when it starts, then every six hours. Run `npm run sync` to pull right away.
 
 Requires Node 22.13+. It uses the built-in `node:sqlite`, so there's no native database driver to install.
 
@@ -31,21 +32,25 @@ Requires Node 22.13+. It uses the built-in `node:sqlite`, so there's no native d
 | Streaming chat endpoint (NDJSON) | `app/api/chat/route.ts` |
 | Agent loop: Gemini plus tools, chats saved per captain | `lib/strategist/agent.ts` |
 | Tools the AI can call (schedule, rosters, match sheets, scouting, player history) | `lib/strategist/tools.ts` |
+| CPL sync (schedule, match sheets, players) | `lib/cpl.ts`, `lib/cpl-schedule.ts`, `instrumentation.ts` |
 | SQLite schema and queries | `lib/db.ts`, `lib/repo.ts` |
 | Captain auth (scrypt passwords, session cookie) | `lib/auth.ts`, `lib/password.ts` |
 
 The strategist runs on Google Gemini (`gemini-flash-latest` by default, which has a free tier; set `GEMINI_MODEL` to change it). Get a key at https://aistudio.google.com/apikey. The strategist answers only from what its tools return, so every score, pairing and date it quotes comes from the database.
 
-## Data
+## Data from CPL
 
-- `data/seed/matches/` holds match sheets. The first is Pickleball Kingdom Tinton Falls vs Bounce Philly (8 rounds, 32 games). Genders come from the sheet's format: in even rounds, games 1–2 are women's doubles and games 3–4 are men's.
-- `data/seed/fixtures.json` holds the schedule (currently @ Monroe, Thu Oct 29, 7:30 PM).
+crossclubpickleball.com is a single-page app backed by a public, read-only JSON API. The sync (`lib/cpl.ts`) reads the same data the Lineups page shows:
 
-Run `npm run seed` after changing either; it's safe to re-run.
+- **Schedule:** every upcoming match for each captain's team, with date, time, home/away and address.
+- **Match sheets:** every completed match involving your team or one of your upcoming opponents, game by game, with each player's gender.
+
+A match is downloaded once and never re-fetched, so routine syncs make only a couple of requests. Forfeited games (no players listed) are skipped.
+
+The division defaults to NJ / PA 4.0. Set `CPL_DIVISION_ID` for another division, or `CPL_SYNC=off` to turn off the automatic sync.
 
 ## Not built yet
 
 - Practice-data upload (CSV, or a match-sheet PDF read by the AI)
 - Pair ratings, win probabilities, and an eight-round lineup optimizer
 - Weekly scouting email ("you're playing X this week; they usually pair…")
-- Automatic sync from crossclubpickleball.com (schedule from `/leagues/lineups`, match sheets from `/leagues/matchup`, players from `/leagues/players`). Until then, schedule and match data come from `data/seed/`.

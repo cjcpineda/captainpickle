@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS matches (
   home_id     INTEGER NOT NULL REFERENCES teams(id),
   away_id     INTEGER NOT NULL REFERENCES teams(id),
   source      TEXT NOT NULL,
+  cpl_id      TEXT,
   created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -64,6 +65,11 @@ CREATE TABLE IF NOT EXISTS sessions (
   expires_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS meta (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS chats (
   id         INTEGER PRIMARY KEY,
   captain_id INTEGER NOT NULL REFERENCES captains(id) ON DELETE CASCADE,
@@ -83,6 +89,7 @@ export function db(): DatabaseSync {
     conn.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
     conn.exec(SCHEMA);
     addMissingColumns(conn);
+    conn.exec("CREATE UNIQUE INDEX IF NOT EXISTS matches_cpl_id ON matches (cpl_id)");
     globalForDb.db = conn;
   }
   return globalForDb.db;
@@ -106,6 +113,7 @@ const ADDED_COLUMNS: [table: string, column: string, definition: string][] = [
   ["fixtures", "start_time", "TEXT NOT NULL DEFAULT '19:30'"],
   ["fixtures", "is_home", "INTEGER NOT NULL DEFAULT 0"],
   ["fixtures", "division", "TEXT"],
+  ["matches", "cpl_id", "TEXT"],
 ];
 
 function addMissingColumns(conn: DatabaseSync) {
@@ -113,4 +121,13 @@ function addMissingColumns(conn: DatabaseSync) {
     const columns = conn.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
     if (!columns.some((c) => c.name === column)) conn.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
   }
+}
+
+export function getMeta(key: string): string | null {
+  const row = db().prepare("SELECT value FROM meta WHERE key = ?").get(key) as { value: string } | undefined;
+  return row?.value ?? null;
+}
+
+export function setMeta(key: string, value: string) {
+  db().prepare("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").run(key, value);
 }
