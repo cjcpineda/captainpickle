@@ -1,7 +1,6 @@
-import { ApiError } from "@google/genai";
 import { z } from "zod";
 import { currentCaptain } from "@/lib/auth.ts";
-import { MissingKeyError } from "@/lib/gemini.ts";
+import { describeAiError } from "@/lib/gemini.ts";
 import { runStrategist } from "@/lib/strategist/agent.ts";
 import type { ChatEvent } from "@/lib/strategist/view.ts";
 
@@ -22,7 +21,7 @@ export async function POST(request: Request) {
         await runStrategist(captain, body.data.chatId, body.data.message, emit);
       } catch (err) {
         console.error(err);
-        emit({ type: "error", message: describe(err) });
+        emit({ type: "error", message: describeAiError(err) });
       } finally {
         controller.close();
       }
@@ -30,14 +29,4 @@ export async function POST(request: Request) {
   });
 
   return new Response(stream, { headers: { "Content-Type": "application/x-ndjson", "Cache-Control": "no-store" } });
-}
-
-function describe(err: unknown): string {
-  if (err instanceof MissingKeyError) return "The AI isn't set up yet. Add GEMINI_API_KEY to the server's environment.";
-  if (err instanceof ApiError) {
-    if (err.status === 429) return "Gemini's free-tier limit was reached. Wait a minute and try again.";
-    if ([400, 401, 403].includes(err.status) && /key/i.test(err.message)) return "Gemini rejected the API key. Check GEMINI_API_KEY.";
-    return "The AI service had a problem. Try again.";
-  }
-  return "Something went wrong. Try again.";
 }

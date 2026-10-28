@@ -259,3 +259,20 @@ export function findPlayer(query: string): Player[] {
     all.filter((p) => p.name.toLowerCase().includes(q)),
   ].find((m) => m.length > 0) ?? [];
 }
+
+export type PracticeSession = { matchId: number; playedOn: string; source: string; games: number };
+
+export function practiceSessions(teamId: number): PracticeSession[] {
+  return db()
+    .prepare(
+      `SELECT m.id AS matchId, m.played_on AS playedOn, m.source, count(g.id) AS games
+       FROM matches m JOIN games g ON g.match_id = m.id
+       WHERE m.kind = 'practice' AND m.home_id = ?
+       GROUP BY m.id ORDER BY m.played_on DESC, m.id DESC`,
+    )
+    .all(teamId) as PracticeSession[];
+}
+
+export function deletePracticeSession(teamId: number, matchId: number) {
+  db().prepare("DELETE FROM matches WHERE id = ? AND kind = 'practice' AND home_id = ?").run(matchId, teamId);
+}

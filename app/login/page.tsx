@@ -9,7 +9,7 @@ export default function LoginPage() {
     <main className="login">
       <form action={action} className="card card-body">
         <h1>
-          Captain <span>Pickle</span>
+          League <span>Captain</span>
         </h1>
         <p>Captains only. Sign in to see your schedule and talk lineups with your AI strategist.</p>
         {error && <p className="error">{error}</p>}

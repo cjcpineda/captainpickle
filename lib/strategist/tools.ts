@@ -3,7 +3,7 @@ import type { FunctionDeclaration } from "@google/genai";
 import { z } from "zod";
 import type { Captain } from "../auth.ts";
 import { leagueToday, lineupDeadline } from "../deadline.ts";
-import { scoutingReport } from "../scouting.ts";
+import { pairRecords, scoutingReport } from "../scouting.ts";
 import {
   findPlayer,
   findTeam,
@@ -77,6 +77,15 @@ const TOOLS = {
       if (!found) return { error: `No team matching "${team}".`, teams: listTeams().map((t) => t.name) };
       return scoutingReport(found.id);
     },
+  }),
+
+  get_pair_records: tool({
+    description:
+      "Every pair our team has used, with league and practice results reported separately " +
+      "(games, wins, point differential). Use it to find our best pairs and how they've done together.",
+    status: "Comparing our pairs",
+    input: z.object({}),
+    run: (_, captain) => pairRecords(captain.teamId),
   }),
 
   get_player_games: tool({

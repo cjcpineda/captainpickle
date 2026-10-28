@@ -10,7 +10,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <header className="topbar">
         <div className="topbar-inner">
           <Link href="/" className="brand">
-            Captain <span>Pickle</span>
+            League <span>Captain</span>
           </Link>
           <NavLinks />
           <form action={logout} className="who">
