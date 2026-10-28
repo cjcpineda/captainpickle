@@ -9,4 +9,10 @@ export const weekday = (iso: string) => parse(iso).toLocaleDateString("en-US", {
 export const longDate = (iso: string) =>
   parse(iso).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: "UTC" });
 
-export const todayIso = () => new Date().toLocaleDateString("en-CA");
+
+
+/** "19:30" → "7:30 PM" */
+export function clockTime(hhmm: string): string {
+  const [h, m] = hhmm.split(":").map(Number);
+  return `${h % 12 || 12}:${String(m).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
+}

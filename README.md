@@ -2,7 +2,12 @@
 
 AI lineup strategist for **Cross Club Pickleball** captains. Captains sign in, see their team's schedule and results, and chat with an AI strategist that can read the league database.
 
-**MVP scope:** captain login, the team's schedule (upcoming matches plus past results with game-by-game lineups), and the AI Strategist chat.
+**What's here:**
+- **Schedule:** the next match (home/away, division, time, location) with its lineup deadline, upcoming matches, and past results with game-by-game lineups.
+- **Scouting report:** for the next opponent, their roster with records, the pairs they use most, their strongest players, and a button that asks the AI for counter-pairings.
+- **AI Strategist:** a chat that reads all of the above from the database.
+
+CPL lineup deadlines: away teams submit two nights before the match, home teams the night before, always at 7:30 PM Eastern (`lib/deadline.ts`).
 
 ## Quick start
 
@@ -20,11 +25,12 @@ Requires Node 22.13+. It uses the built-in `node:sqlite`, so there's no native d
 
 | Piece | Where |
 | --- | --- |
-| Schedule page (next match, upcoming, results, add a match) | `app/(app)/page.tsx` |
+| Schedule page (next match, deadline, upcoming, results) | `app/(app)/page.tsx` |
+| Scouting report page | `app/(app)/scouting/page.tsx`, `lib/scouting.ts` |
 | AI Strategist chat UI | `components/Chat.tsx`, `components/Strategist.tsx` |
 | Streaming chat endpoint (NDJSON) | `app/api/chat/route.ts` |
 | Agent loop: Claude plus tools, chats saved per captain | `lib/strategist/agent.ts` |
-| Tools the AI can call (schedule, rosters, match sheets, player history) | `lib/strategist/tools.ts` |
+| Tools the AI can call (schedule, rosters, match sheets, scouting, player history) | `lib/strategist/tools.ts` |
 | SQLite schema and queries | `lib/db.ts`, `lib/repo.ts` |
 | Captain auth (scrypt passwords, session cookie) | `lib/auth.ts`, `lib/password.ts` |
 
@@ -32,13 +38,14 @@ The strategist runs on `claude-opus-5-5`. It answers only from what its tools re
 
 ## Data
 
-`data/seed/cross-club-2026-10-26.json` is the Pickleball Kingdom Tinton Falls vs Bounce Philly match sheet (8 rounds, 32 games). Genders come from the sheet's format: in even rounds, games 1–2 are women's doubles and games 3–4 are men's. To add another match sheet, drop a JSON file in the same shape into `data/seed/` and run `npm run seed` again.
+- `data/seed/matches/` holds match sheets. The first is Pickleball Kingdom Tinton Falls vs Bounce Philly (8 rounds, 32 games). Genders come from the sheet's format: in even rounds, games 1–2 are women's doubles and games 3–4 are men's.
+- `data/seed/fixtures.json` holds the schedule (currently @ Monroe, Thu Oct 29, 7:30 PM).
 
-Captains add upcoming matches from the Schedule page.
+Run `npm run seed` after changing either; it's safe to re-run.
 
 ## Not built yet
 
 - Practice-data upload (CSV, or match-sheet PDF read by Claude)
 - Pair ratings, win probabilities, and an eight-round lineup optimizer
 - Weekly scouting email ("you're playing X this week; they usually pair…")
-- Sync from crossclubpickleball.com (`/leagues/lineups`, `/leagues/players`)
+- Automatic sync from crossclubpickleball.com (schedule from `/leagues/lineups`, match sheets from `/leagues/matchup`, players from `/leagues/players`). Until then, schedule and match data come from `data/seed/`.

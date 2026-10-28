@@ -5,7 +5,18 @@ export type Team = { id: number; name: string };
 
 export type Player = { id: number; name: string; gender: Gender | null; teamId: number; teamName: string };
 
-export type Fixture = { id: number; opponent: string; playOn: string; location: string | null };
+export type Fixture = {
+  id: number;
+  opponent: string;
+  opponentId: number;
+  playOn: string;
+  startTime: string;
+  isHome: boolean;
+  division: string | null;
+  location: string | null;
+};
+
+export type FixtureInput = Omit<Fixture, "id" | "opponentId"> & { team: string };
 
 export type Result = {
   matchId: number;
@@ -93,23 +104,28 @@ export function teamPlayers(teamId: number): Player[] {
 }
 
 export function upcomingFixtures(teamId: number, fromDate: string): Fixture[] {
-  return db()
+  const rows = db()
     .prepare(
-      `SELECT f.id, t.name AS opponent, f.play_on AS playOn, f.location
+      `SELECT f.id, t.name AS opponent, f.opponent_id AS opponentId, f.play_on AS playOn, f.start_time AS startTime,
+              f.is_home AS isHome, f.division, f.location
        FROM fixtures f JOIN teams t ON t.id = f.opponent_id
        WHERE f.team_id = ? AND f.play_on >= ? ORDER BY f.play_on`,
     )
-    .all(teamId, fromDate) as Fixture[];
+    .all(teamId, fromDate) as (Omit<Fixture, "isHome"> & { isHome: number })[];
+  return rows.map((r) => ({ ...r, isHome: r.isHome === 1 }));
 }
 
-export function addFixture(teamId: number, opponent: string, playOn: string, location: string | null) {
+/** Inserts or refreshes a scheduled match (from the CPL schedule or a seed file). */
+export function upsertFixture(f: FixtureInput) {
   db()
-    .prepare("INSERT OR IGNORE INTO fixtures (team_id, opponent_id, play_on, location) VALUES (?, ?, ?, ?)")
-    .run(teamId, upsertTeam(opponent), playOn, location);
-}
-
-export function deleteFixture(teamId: number, fixtureId: number) {
-  db().prepare("DELETE FROM fixtures WHERE id = ? AND team_id = ?").run(fixtureId, teamId);
+    .prepare(
+      `INSERT INTO fixtures (team_id, opponent_id, play_on, start_time, is_home, division, location)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (team_id, opponent_id, play_on) DO UPDATE SET
+         start_time = excluded.start_time, is_home = excluded.is_home,
+         division = excluded.division, location = excluded.location`,
+    )
+    .run(upsertTeam(f.team), upsertTeam(f.opponent), f.playOn, f.startTime, f.isHome ? 1 : 0, f.division, f.location);
 }
 
 /** League results from our side of the net: games won and lost per match. */

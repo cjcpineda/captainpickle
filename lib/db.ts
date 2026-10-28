@@ -43,6 +43,9 @@ CREATE TABLE IF NOT EXISTS fixtures (
   team_id     INTEGER NOT NULL REFERENCES teams(id),
   opponent_id INTEGER NOT NULL REFERENCES teams(id),
   play_on     TEXT NOT NULL,
+  start_time  TEXT NOT NULL DEFAULT '19:30',
+  is_home     INTEGER NOT NULL DEFAULT 0,
+  division    TEXT,
   location    TEXT,
   UNIQUE (team_id, opponent_id, play_on)
 );
@@ -79,6 +82,7 @@ export function db(): DatabaseSync {
     const conn = new DatabaseSync(path);
     conn.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
     conn.exec(SCHEMA);
+    addMissingColumns(conn);
     globalForDb.db = conn;
   }
   return globalForDb.db;
@@ -94,5 +98,19 @@ export function transaction<T>(fn: () => T): T {
   } catch (err) {
     conn.exec("ROLLBACK");
     throw err;
+  }
+}
+
+/** Columns added after the first release, so databases created earlier keep working. */
+const ADDED_COLUMNS: [table: string, column: string, definition: string][] = [
+  ["fixtures", "start_time", "TEXT NOT NULL DEFAULT '19:30'"],
+  ["fixtures", "is_home", "INTEGER NOT NULL DEFAULT 0"],
+  ["fixtures", "division", "TEXT"],
+];
+
+function addMissingColumns(conn: DatabaseSync) {
+  for (const [table, column, definition] of ADDED_COLUMNS) {
+    const columns = conn.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+    if (!columns.some((c) => c.name === column)) conn.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
   }
 }

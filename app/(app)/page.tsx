@@ -1,13 +1,12 @@
 import Link from "next/link";
 import { requireCaptain } from "@/lib/auth.ts";
-import { longDate, monthDay, todayIso, weekday } from "@/lib/dates.ts";
-import { matchGames, results, upcomingFixtures, type Result } from "@/lib/repo.ts";
-import { removeMatch } from "../actions.ts";
-import { AddFixtureForm } from "@/components/AddFixtureForm.tsx";
+import { clockTime, longDate, monthDay, weekday } from "@/lib/dates.ts";
+import { leagueToday, lineupDeadline } from "@/lib/deadline.ts";
+import { matchGames, results, upcomingFixtures, type Fixture, type Result } from "@/lib/repo.ts";
 
 export default async function SchedulePage() {
   const captain = await requireCaptain();
-  const upcoming = upcomingFixtures(captain.teamId, todayIso());
+  const upcoming = upcomingFixtures(captain.teamId, leagueToday());
   const played = results(captain.teamId);
   const [next] = upcoming;
 
@@ -15,32 +14,12 @@ export default async function SchedulePage() {
     <>
       <div className="page-head">
         <div>
-          <div className="kicker">Cross Club Pickleball</div>
+          <div className="kicker">Cross Club Pickleball{next?.division && ` · ${next.division}`}</div>
           <h1>{captain.teamName}</h1>
         </div>
       </div>
 
-      {next && (
-        <section className="next-match">
-          <div>
-            <div className="kicker">Next match</div>
-            <div className="vs">
-              <small>vs</small>
-              {next.opponent}
-            </div>
-            <div className="when">
-              {longDate(next.playOn)}
-              {next.location && ` · ${next.location}`}
-            </div>
-          </div>
-          <Link
-            className="button"
-            href={`/strategist?q=${encodeURIComponent(`We're playing ${next.opponent} on ${longDate(next.playOn)}. Help me plan our lineup.`)}`}
-          >
-            Plan lineup
-          </Link>
-        </section>
-      )}
+      {next && <NextMatch fixture={next} />}
 
       <div className="grid">
         <div className="stack">
@@ -49,19 +28,22 @@ export default async function SchedulePage() {
               <h2>Upcoming</h2>
             </div>
             {upcoming.length === 0 ? (
-              <p className="empty">Nothing scheduled yet. Add your next match.</p>
+              <p className="empty">Nothing scheduled.</p>
             ) : (
               <ul className="rows">
                 {upcoming.map((f) => (
                   <li key={f.id} className="row">
                     <DateChip iso={f.playOn} />
                     <div>
-                      <div className="opponent">vs {f.opponent}</div>
-                      {f.location && <div className="sub">{f.location}</div>}
+                      <div className="opponent">
+                        {f.isHome ? "vs" : "@"} {f.opponent}
+                      </div>
+                      <div className="sub">
+                        {clockTime(f.startTime)}
+                        {f.location && ` · ${f.location}`}
+                      </div>
                     </div>
-                    <form action={removeMatch.bind(null, f.id)}>
-                      <button className="icon-button" aria-label={`Remove match vs ${f.opponent}`}>×</button>
-                    </form>
+                    <span className={`badge ${f.isHome ? "home" : "away"}`}>{f.isHome ? "HOME" : "AWAY"}</span>
                   </li>
                 ))}
               </ul>
@@ -87,14 +69,49 @@ export default async function SchedulePage() {
 
         <aside className="card">
           <div className="card-head">
-            <h2>Add a match</h2>
+            <h2>Lineup deadlines</h2>
           </div>
-          <div className="card-body">
-            <AddFixtureForm />
-          </div>
+          <dl className="rules">
+            <dt>Away match</dt>
+            <dd>Two nights before, 7:30 PM</dd>
+            <dt>Home match</dt>
+            <dd>The night before, 7:30 PM</dd>
+          </dl>
         </aside>
       </div>
     </>
+  );
+}
+
+function NextMatch({ fixture }: { fixture: Fixture }) {
+  const deadline = lineupDeadline(fixture.playOn, fixture.isHome);
+  const ask = `We're ${fixture.isHome ? "hosting" : "playing at"} ${fixture.opponent} on ${longDate(fixture.playOn)}. Help me plan our lineup.`;
+  return (
+    <section className="next-match">
+      <div>
+        <div className="kicker">Next match · {fixture.isHome ? "Home" : "Away"}</div>
+        <div className="vs">
+          <small>{fixture.isHome ? "vs" : "@"}</small>
+          {fixture.opponent}
+        </div>
+        <div className="when">
+          {longDate(fixture.playOn)} · {clockTime(fixture.startTime)}
+          {fixture.location && ` · ${fixture.location}`}
+        </div>
+        <div className={`deadline ${deadline.passed ? "passed" : ""}`}>
+          {deadline.passed ? "Lineup locked" : "Lineup due"} {weekday(deadline.date)}, {monthDay(deadline.date)} ·{" "}
+          {clockTime(deadline.time)}
+        </div>
+      </div>
+      <div className="actions">
+        <Link className="button" href={`/scouting?team=${fixture.opponentId}`}>
+          Scouting report
+        </Link>
+        <Link className="button ghost" href={`/strategist?q=${encodeURIComponent(ask)}`}>
+          Plan lineup
+        </Link>
+      </div>
+    </section>
   );
 }
 

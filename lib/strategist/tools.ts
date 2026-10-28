@@ -2,6 +2,8 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import type { Captain } from "../auth.ts";
+import { leagueToday, lineupDeadline } from "../deadline.ts";
+import { scoutingReport } from "../scouting.ts";
 import {
   findPlayer,
   findTeam,
@@ -22,16 +24,19 @@ type Tool<S extends z.ZodType> = {
 
 const tool = <S extends z.ZodType>(t: Tool<S>) => t;
 
-const today = () => new Date().toISOString().slice(0, 10);
-
 const TOOLS = {
   get_schedule: tool({
-    description: "Our team's upcoming matches and past league results (games won-lost per match).",
+    description:
+      "Our team's upcoming matches (date, start time, home/away, division, location, lineup deadline) " +
+      "and past league results (games won-lost per match).",
     status: "Checking the schedule",
     input: z.object({}),
     run: (_, captain) => ({
       team: captain.teamName,
-      upcoming: upcomingFixtures(captain.teamId, today()),
+      upcoming: upcomingFixtures(captain.teamId, leagueToday()).map((f) => ({
+        ...f,
+        lineupDeadline: lineupDeadline(f.playOn, f.isHome),
+      })),
       results: results(captain.teamId),
     }),
   }),
@@ -58,6 +63,19 @@ const TOOLS = {
         (r) => !opponent || r.opponent.toLowerCase().includes(opponent.trim().toLowerCase()),
       );
       return matches.map((m) => ({ ...m, games: matchGames(m.matchId, captain.teamId) }));
+    },
+  }),
+
+  get_scouting_report: tool({
+    description:
+      "Scouting report on a team: roster with each player's record and point differential, every pair they've used " +
+      "(most frequent first, with format and record), and their strongest players by win rate.",
+    status: "Scouting the opponent",
+    input: z.object({ team: z.string() }),
+    run: ({ team }) => {
+      const found = findTeam(team);
+      if (!found) return { error: `No team matching "${team}".`, teams: listTeams().map((t) => t.name) };
+      return scoutingReport(found.id);
     },
   }),
 
