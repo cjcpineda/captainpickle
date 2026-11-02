@@ -25,12 +25,6 @@
 			// Replace with the id printed by `npx wrangler d1 create captainpickle`.
 			"database_id": "1ba65257-fffd-478b-8ed6-56e531856a00",
 			"migrations_dir": "migrations"
-		},
-		{
-			"binding": "leaguecaptain_db",
-			"database_name": "captainpickle",
-			"database_id": "1ba65257-fffd-478b-8ed6-56e531856a00",
-			"remote": true
 		}
 	],
 	// Pull the CPL schedule and results every 6 hours.
