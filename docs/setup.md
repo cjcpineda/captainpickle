@@ -10,10 +10,10 @@ AI lineup strategist for Cross Club Pickleball captains.
 git clone https://github.com/cjcpineda/captainpickle.git
 cd captainpickle
 npm install
-cp .env.example .env.local
+cp .dev.vars.example .env
 ```
 
-Open `.env.local` and set `GEMINI_API_KEY`.
+Open `.env` and set `GEMINI_API_KEY`.
 
 Create the local database:
 
