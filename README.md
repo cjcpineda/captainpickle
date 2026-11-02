@@ -18,7 +18,7 @@ Requires Node 22.13+ and a [Gemini API key](https://aistudio.google.com/apikey).
 git clone https://github.com/cjcpineda/captainpickle.git
 cd captainpickle
 npm install
-cp .dev.vars.example .env.local   # then set GEMINI_API_KEY
+cp .dev.vars.example .env         # then set GEMINI_API_KEY
 npm run db:migrate                # creates the local D1 database
 npm run captain -- you@example.com "Your Name" "Your Team Name" <password>
 npm run sync                      # pulls your schedule and results from CPL
@@ -27,7 +27,7 @@ npm run dev                       # http://localhost:3000
 
 | Command | What it does |
 | --- | --- |
-| `npm run dev` | Day-to-day local development (uses `.env.local`) |
+| `npm run dev` | Day-to-day local development (uses `.env`) |
 | `npm run preview` | Run locally inside the real Cloudflare Workers runtime (copy `.dev.vars.example` to `.dev.vars` first) |
 | `npm run sync` | Pull the latest CPL data into the local database |
 | `npm test` | Run the tests |
