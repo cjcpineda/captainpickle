@@ -27,6 +27,25 @@
 			"migrations_dir": "migrations"
 		}
 	],
+	// Preview builds (branches other than production) use the same database as production, so a
+	// preview link shows real data and anything done on it changes real data. To keep previews
+	// separate, create a second database (`npx wrangler d1 create captainpickle-preview`) and put
+	// its id here instead.
+	"previews": {
+		"d1_databases": [
+			{
+				"binding": "DB",
+				"database_name": "captainpickle",
+				"database_id": "1ba65257-fffd-478b-8ed6-56e531856a00"
+			}
+		],
+		"services": [
+			{
+				"binding": "WORKER_SELF_REFERENCE",
+				"service": "captainpickle"
+			}
+		]
+	},
 	// Pull the CPL schedule and results every 6 hours.
 	"triggers": {
 		"crons": [
