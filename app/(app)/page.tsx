@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireCaptain } from "@/lib/auth.ts";
 import { lastSyncedAt } from "@/lib/cpl.ts";
+import { SyncButton } from "@/components/SyncButton.tsx";
 import { clockTime, longDate, monthDay, timeAgo, weekday } from "@/lib/dates.ts";
 import { leagueToday, lineupDeadline } from "@/lib/deadline.ts";
 import { matchGames, results, upcomingFixtures, type Fixture, type Result } from "@/lib/repo.ts";
@@ -21,7 +22,10 @@ export default async function SchedulePage() {
           <div className="kicker">Cross Club Pickleball{next?.division && ` · ${next.division}`}</div>
           <h1>{captain.teamName}</h1>
         </div>
-        <span className="sub">{synced ? `Synced from CPL ${timeAgo(synced)}` : "Waiting for first CPL sync"}</span>
+        <div className="sync">
+          <span className="sub">{synced ? `Synced from CPL ${timeAgo(synced)}` : "Not synced from CPL yet"}</span>
+          <SyncButton />
+        </div>
       </div>
 
       {next && <NextMatch fixture={next} />}

@@ -32,7 +32,7 @@ npm run dev                       # http://localhost:3000
 | `npm run sync` | Pull the latest CPL data into the local database |
 | `npm test` | Run the tests |
 
-Locally, the CPL sync only runs when you call `npm run sync`. On Cloudflare it runs every six hours (cron in `wrangler.jsonc`).
+Your computer and Cloudflare have **separate databases**. `npm run dev` and `npm run sync` use the local one; the live site uses D1 on Cloudflare. To fill either one with CPL data, sign in and press **Sync now** on the Schedule page: it syncs the database of the site you're on. On Cloudflare the sync also runs by itself every six hours (cron in `wrangler.jsonc`).
 
 ## Deploy to Cloudflare
 

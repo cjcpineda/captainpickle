@@ -409,3 +409,7 @@ input:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 
 .button.secondary { background: transparent; color: var(--ink); border: 1px solid #cdd2da; }
 
 .session-row { grid-template-columns: 64px 1fr auto; }
+
+.sync { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: flex-end; }
+.sync .error { margin: 6px 0 0; }
+.button.small { padding: 6px 12px; font-size: 13px; }
