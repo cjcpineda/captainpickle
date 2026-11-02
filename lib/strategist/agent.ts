@@ -26,13 +26,13 @@ Style: write like a sharp sports analyst: short, confident, no filler. Use **bol
 type Emit = (event: ChatEvent) => void;
 
 export async function runStrategist(captain: Captain, chatId: number | null, text: string, emit: Emit) {
-  const id = chatId ?? createChat(captain.id, text);
-  const messages = loadMessages(captain.id, id);
+  const id = chatId ?? (await createChat(captain.id, text));
+  const messages = await loadMessages(captain.id, id);
   if (!messages) throw new Error("Chat not found.");
   emit({ type: "chat", id });
 
   messages.push({ role: "user", parts: [{ text }] });
-  saveMessages(id, messages);
+  await saveMessages(id, messages);
 
   const context = `Captain: ${captain.name}. Team: ${captain.teamName}. Today: ${new Date().toDateString()}.`;
 
@@ -59,18 +59,19 @@ export async function runStrategist(captain: Captain, chatId: number | null, tex
       break;
     }
     messages.push({ role: "model", parts });
-    saveMessages(id, messages);
+    await saveMessages(id, messages);
 
     const calls = parts.flatMap((p) => (p.functionCall ? [p.functionCall] : []));
     if (calls.length === 0) break;
 
-    const responses: Part[] = calls.map((call) => {
+    const responses: Part[] = [];
+    for (const call of calls) {
       const name = call.name ?? "";
       emit({ type: "status", label: toolStatus(name) });
-      return { functionResponse: { id: call.id, name, response: runTool(name, call.args, captain) } };
-    });
+      responses.push({ functionResponse: { id: call.id, name, response: await runTool(name, call.args, captain) } });
+    }
     messages.push({ role: "user", parts: responses });
-    saveMessages(id, messages);
+    await saveMessages(id, messages);
   }
 
   emit({ type: "done" });

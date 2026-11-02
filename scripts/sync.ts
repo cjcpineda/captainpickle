@@ -1,8 +1,13 @@
 /**
- * Pulls schedules and match history from Cross Club Pickleball for every captain's team.
- * The server also does this on its own at startup and every six hours.
+ * Pulls schedules and match history from Cross Club Pickleball into the local D1 database.
+ * On Cloudflare this runs on its own every six hours (the cron trigger in wrangler.jsonc).
  *   npm run sync
  */
+import { getPlatformProxy } from "wrangler";
+import { useDatabase } from "../lib/db.ts";
 import { syncAllTeams } from "../lib/cpl-schedule.ts";
 
-await syncAllTeams();
+const { env, dispose } = await getPlatformProxy<CloudflareEnv>();
+useDatabase(env.DB);
+await syncAllTeams(process.env.CPL_DIVISION_ID);
+await dispose();

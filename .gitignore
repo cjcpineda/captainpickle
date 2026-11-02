@@ -9,3 +9,7 @@ data/*.db*
 __pycache__/
 .streamlit/secrets.toml
 .env
+# Cloudflare
+.open-next
+.wrangler
+.dev.vars

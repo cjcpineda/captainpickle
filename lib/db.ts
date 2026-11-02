@@ -1,133 +1,47 @@
-import { DatabaseSync } from "node:sqlite";
-import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+/**
+ * Database access. The app runs on Cloudflare Workers, so data lives in D1 (Cloudflare's SQLite).
+ * The schema is in migrations/; apply it with `npm run db:migrate` (local) or `npm run db:migrate:remote`.
+ */
+import { getCloudflareContext } from "@opennextjs/cloudflare";
 
-const SCHEMA = `
-CREATE TABLE IF NOT EXISTS teams (
-  id        INTEGER PRIMARY KEY,
-  name      TEXT NOT NULL UNIQUE COLLATE NOCASE
-);
+type Param = string | number | null;
 
-CREATE TABLE IF NOT EXISTS players (
-  id              INTEGER PRIMARY KEY,
-  name            TEXT NOT NULL COLLATE NOCASE,
-  gender          TEXT CHECK (gender IN ('M', 'F')),
-  team_id         INTEGER REFERENCES teams(id),
-  UNIQUE (name, team_id)
-);
+/** Set by code that runs outside a Next.js request (the cron handler), where the binding is passed in directly. */
+let boundDb: D1Database | undefined;
 
-CREATE TABLE IF NOT EXISTS matches (
-  id          INTEGER PRIMARY KEY,
-  kind        TEXT NOT NULL CHECK (kind IN ('league', 'practice')),
-  played_on   TEXT NOT NULL,
-  home_id     INTEGER NOT NULL REFERENCES teams(id),
-  away_id     INTEGER NOT NULL REFERENCES teams(id),
-  source      TEXT NOT NULL,
-  cpl_id      TEXT,
-  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS games (
-  id        INTEGER PRIMARY KEY,
-  match_id  INTEGER NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
-  round     INTEGER,
-  a1        INTEGER NOT NULL REFERENCES players(id),
-  a2        INTEGER NOT NULL REFERENCES players(id),
-  b1        INTEGER NOT NULL REFERENCES players(id),
-  b2        INTEGER NOT NULL REFERENCES players(id),
-  score_a   INTEGER NOT NULL,
-  score_b   INTEGER NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS fixtures (
-  id          INTEGER PRIMARY KEY,
-  team_id     INTEGER NOT NULL REFERENCES teams(id),
-  opponent_id INTEGER NOT NULL REFERENCES teams(id),
-  play_on     TEXT NOT NULL,
-  start_time  TEXT NOT NULL DEFAULT '19:30',
-  is_home     INTEGER NOT NULL DEFAULT 0,
-  division    TEXT,
-  location    TEXT,
-  UNIQUE (team_id, opponent_id, play_on)
-);
-
-CREATE TABLE IF NOT EXISTS captains (
-  id            INTEGER PRIMARY KEY,
-  email         TEXT NOT NULL UNIQUE COLLATE NOCASE,
-  name          TEXT NOT NULL,
-  team_id       INTEGER NOT NULL REFERENCES teams(id),
-  password_hash TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS sessions (
-  token      TEXT PRIMARY KEY,
-  captain_id INTEGER NOT NULL REFERENCES captains(id) ON DELETE CASCADE,
-  expires_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS meta (
-  key   TEXT PRIMARY KEY,
-  value TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS chats (
-  id         INTEGER PRIMARY KEY,
-  captain_id INTEGER NOT NULL REFERENCES captains(id) ON DELETE CASCADE,
-  title      TEXT NOT NULL,
-  messages   TEXT NOT NULL DEFAULT '[]',
-  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-`;
-
-const globalForDb = globalThis as unknown as { db?: DatabaseSync };
-
-export function db(): DatabaseSync {
-  if (!globalForDb.db) {
-    const path = process.env.DATABASE_PATH ?? "data/captainpickle.db";
-    if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
-    const conn = new DatabaseSync(path);
-    conn.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
-    conn.exec(SCHEMA);
-    addMissingColumns(conn);
-    conn.exec("CREATE UNIQUE INDEX IF NOT EXISTS matches_cpl_id ON matches (cpl_id)");
-    globalForDb.db = conn;
-  }
-  return globalForDb.db;
+export function useDatabase(database: D1Database) {
+  boundDb = database;
 }
 
-export function transaction<T>(fn: () => T): T {
-  const conn = db();
-  conn.exec("BEGIN");
-  try {
-    const result = fn();
-    conn.exec("COMMIT");
-    return result;
-  } catch (err) {
-    conn.exec("ROLLBACK");
-    throw err;
-  }
+function d1(): D1Database {
+  return boundDb ?? getCloudflareContext().env.DB;
 }
 
-/** Columns added after the first release, so databases created earlier keep working. */
-const ADDED_COLUMNS: [table: string, column: string, definition: string][] = [
-  ["fixtures", "start_time", "TEXT NOT NULL DEFAULT '19:30'"],
-  ["fixtures", "is_home", "INTEGER NOT NULL DEFAULT 0"],
-  ["fixtures", "division", "TEXT"],
-  ["matches", "cpl_id", "TEXT"],
-];
+/** A prepared statement, for passing to batch(). */
+export const stmt = (sql: string, ...params: Param[]) => d1().prepare(sql).bind(...params);
 
-function addMissingColumns(conn: DatabaseSync) {
-  for (const [table, column, definition] of ADDED_COLUMNS) {
-    const columns = conn.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
-    if (!columns.some((c) => c.name === column)) conn.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
-  }
+export async function all<T>(sql: string, ...params: Param[]): Promise<T[]> {
+  return (await stmt(sql, ...params).all<T>()).results;
 }
 
-export function getMeta(key: string): string | null {
-  const row = db().prepare("SELECT value FROM meta WHERE key = ?").get(key) as { value: string } | undefined;
+export async function get<T>(sql: string, ...params: Param[]): Promise<T | undefined> {
+  return (await stmt(sql, ...params).first<T>()) ?? undefined;
+}
+
+export async function run(sql: string, ...params: Param[]) {
+  return stmt(sql, ...params).run();
+}
+
+/** Runs statements in order as one transaction: all succeed or none do. */
+export function batch(statements: D1PreparedStatement[]) {
+  return statements.length > 0 ? d1().batch(statements) : Promise.resolve([]);
+}
+
+export async function getMeta(key: string): Promise<string | null> {
+  const row = await get<{ value: string }>("SELECT value FROM meta WHERE key = ?", key);
   return row?.value ?? null;
 }
 
-export function setMeta(key: string, value: string) {
-  db().prepare("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").run(key, value);
+export async function setMeta(key: string, value: string) {
+  await run("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value", key, value);
 }

@@ -1,5 +1,5 @@
 /** Scouting report for an opponent, built from every game of theirs we have on file. */
-import { db } from "./db.ts";
+import { all, get } from "./db.ts";
 import type { Gender } from "./rules.ts";
 
 export type Format = "mixed" | "womens" | "mens";
@@ -36,25 +36,22 @@ const SIDES = `
   UNION ALL
   SELECT g.b1, g.b2, g.score_b, g.score_a FROM games g`;
 
-export function scoutingReport(teamId: number): ScoutingReport {
-  const conn = db();
-  const team = (conn.prepare("SELECT name FROM teams WHERE id = ?").get(teamId) as { name: string }).name;
+export async function scoutingReport(teamId: number): Promise<ScoutingReport> {
+  const { name: team } = (await get<{ name: string }>("SELECT name FROM teams WHERE id = ?", teamId))!;
 
-  const roster = conn
-    .prepare(
-      `WITH sides AS (${SIDES}),
+  const roster = await all<ScoutedPlayer>(
+    `WITH sides AS (${SIDES}),
        appearances AS (SELECT p1 AS id, pf, pa FROM sides UNION ALL SELECT p2, pf, pa FROM sides)
        SELECT p.name, p.gender, count(a.id) AS games,
               coalesce(sum(a.pf > a.pa), 0) AS wins, coalesce(sum(a.pf - a.pa), 0) AS pointDiff
        FROM players p LEFT JOIN appearances a ON a.id = p.id
        WHERE p.team_id = ?
        GROUP BY p.id ORDER BY games DESC, p.name`,
-    )
-    .all(teamId) as ScoutedPlayer[];
+    teamId,
+  );
 
-  const pairs = conn
-    .prepare(
-      `WITH sides AS (${SIDES})
+  const pairs = await all<{ n1: string; n2: string; g1: Gender | null; g2: Gender | null; games: number; wins: number; pointDiff: number }>(
+    `WITH sides AS (${SIDES})
        SELECT x.name AS n1, y.name AS n2, x.gender AS g1, y.gender AS g2,
               count(*) AS games, sum(s.pf > s.pa) AS wins, sum(s.pf - s.pa) AS pointDiff
        FROM sides s
@@ -63,15 +60,14 @@ export function scoutingReport(teamId: number): ScoutingReport {
        WHERE x.team_id = ?
        GROUP BY x.id, y.id
        ORDER BY games DESC, wins DESC, pointDiff DESC`,
-    )
-    .all(teamId) as { n1: string; n2: string; g1: Gender | null; g2: Gender | null; games: number; wins: number; pointDiff: number }[];
+    teamId,
+  );
 
-  const { gamesOnFile } = conn
-    .prepare(
-      `SELECT count(*) AS gamesOnFile FROM games g
+  const { gamesOnFile } = (await get<{ gamesOnFile: number }>(
+    `SELECT count(*) AS gamesOnFile FROM games g
        WHERE EXISTS (SELECT 1 FROM players p WHERE p.team_id = ? AND p.id IN (g.a1, g.a2, g.b1, g.b2))`,
-    )
-    .get(teamId) as { gamesOnFile: number };
+    teamId,
+  ))!;
 
   const strongest = roster
     .filter((p) => p.games >= MIN_GAMES_TO_RANK)
@@ -102,10 +98,9 @@ export type PairRecord = {
 };
 
 /** Every pair a team has used, with league and practice results kept apart. */
-export function pairRecords(teamId: number): PairRecord[] {
-  const rows = db()
-    .prepare(
-      `WITH sides AS (
+export async function pairRecords(teamId: number): Promise<PairRecord[]> {
+  const rows = await all<{ n1: string; n2: string; g1: Gender | null; g2: Gender | null; lg: number; lw: number; ld: number; pg: number; pw: number; pd: number }>(
+    `WITH sides AS (
          SELECT m.kind, g.a1 AS p1, g.a2 AS p2, g.score_a AS pf, g.score_b AS pa FROM games g JOIN matches m ON m.id = g.match_id
          UNION ALL
          SELECT m.kind, g.b1, g.b2, g.score_b, g.score_a FROM games g JOIN matches m ON m.id = g.match_id)
@@ -119,8 +114,8 @@ export function pairRecords(teamId: number): PairRecord[] {
        JOIN players y ON y.id = max(s.p1, s.p2)
        WHERE x.team_id = ? AND y.team_id = x.team_id
        GROUP BY x.id, y.id`,
-    )
-    .all(teamId) as { n1: string; n2: string; g1: Gender | null; g2: Gender | null; lg: number; lw: number; ld: number; pg: number; pw: number; pd: number }[];
+    teamId,
+  );
 
   return rows.map((r) => ({
     players: [r.n1, r.n2],

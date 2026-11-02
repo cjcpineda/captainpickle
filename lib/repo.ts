@@ -1,4 +1,4 @@
-import { db, transaction } from "./db.ts";
+import { all, batch, get, run, stmt } from "./db.ts";
 import type { Gender } from "./rules.ts";
 
 export type Team = { id: number; name: string };
@@ -46,79 +46,88 @@ export type MatchInput = {
   games: { round: number | null; a: [string, string]; b: [string, string]; scoreA: number; scoreB: number }[];
 };
 
-export function upsertTeam(name: string): number {
-  const conn = db();
-  conn.prepare("INSERT INTO teams (name) VALUES (?) ON CONFLICT (name) DO NOTHING").run(name.trim());
-  return (conn.prepare("SELECT id FROM teams WHERE name = ?").get(name.trim()) as { id: number }).id;
+export async function upsertTeam(name: string): Promise<number> {
+  const row = await get<{ id: number }>(
+    "INSERT INTO teams (name) VALUES (?) ON CONFLICT (name) DO UPDATE SET name = teams.name RETURNING id",
+    name.trim(),
+  );
+  return row!.id;
 }
 
-export function upsertPlayer(name: string, teamId: number, gender: Gender | null): number {
-  const conn = db();
-  conn
-    .prepare(
-      `INSERT INTO players (name, team_id, gender) VALUES (?, ?, ?)
-       ON CONFLICT (name, team_id) DO UPDATE SET gender = coalesce(excluded.gender, players.gender)`,
-    )
-    .run(name.trim(), teamId, gender);
-  return (conn.prepare("SELECT id FROM players WHERE name = ? AND team_id = ?").get(name.trim(), teamId) as { id: number }).id;
+export async function upsertPlayer(name: string, teamId: number, gender: Gender | null): Promise<number> {
+  const row = await get<{ id: number }>(
+    `INSERT INTO players (name, team_id, gender) VALUES (?, ?, ?)
+     ON CONFLICT (name, team_id) DO UPDATE SET gender = coalesce(excluded.gender, players.gender)
+     RETURNING id`,
+    name.trim(),
+    teamId,
+    gender,
+  );
+  return row!.id;
 }
 
-export function insertMatch(input: MatchInput): number {
-  return transaction(() => {
-    const conn = db();
-    const homeId = upsertTeam(input.home);
-    const awayId = upsertTeam(input.away);
-    const ids = new Map(input.players.map((p) => [p.name, upsertPlayer(p.name, upsertTeam(p.team), p.gender)]));
-    const id = (name: string) => ids.get(name) ?? upsertPlayer(name, homeId, null);
+export async function insertMatch(input: MatchInput): Promise<number> {
+  const homeId = await upsertTeam(input.home);
+  const awayId = await upsertTeam(input.away);
 
-    const { lastInsertRowid } = conn
-      .prepare("INSERT INTO matches (kind, played_on, home_id, away_id, source, cpl_id) VALUES (?, ?, ?, ?, ?, ?)")
-      .run(input.kind, input.playedOn, homeId, awayId, input.source, input.cplId ?? null);
-    const insertGame = conn.prepare(
-      "INSERT INTO games (match_id, round, a1, a2, b1, b2, score_a, score_b) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-    );
-    for (const g of input.games) {
-      insertGame.run(lastInsertRowid, g.round, id(g.a[0]), id(g.a[1]), id(g.b[0]), id(g.b[1]), g.scoreA, g.scoreB);
-    }
-    return Number(lastInsertRowid);
-  });
+  // Resolve every player to an id first; names not in the player list default to the home team.
+  const ids = new Map<string, number>();
+  for (const p of input.players) ids.set(p.name, await upsertPlayer(p.name, await upsertTeam(p.team), p.gender));
+  for (const name of input.games.flatMap((g) => [...g.a, ...g.b])) {
+    if (!ids.has(name)) ids.set(name, await upsertPlayer(name, homeId, null));
+  }
+  const id = (name: string) => ids.get(name)!;
+
+  // The match and its games are written together, so a failure never leaves a match without games.
+  const [inserted] = await batch([
+    stmt(
+    "INSERT INTO matches (kind, played_on, home_id, away_id, source, cpl_id) VALUES (?, ?, ?, ?, ?, ?) RETURNING id",
+      input.kind, input.playedOn, homeId, awayId, input.source, input.cplId ?? null,
+    ),
+    ...input.games.map((g) =>
+      stmt(
+        `INSERT INTO games (match_id, round, a1, a2, b1, b2, score_a, score_b)
+         VALUES ((SELECT max(id) FROM matches), ?, ?, ?, ?, ?, ?, ?)`,
+        g.round, id(g.a[0]), id(g.a[1]), id(g.b[0]), id(g.b[1]), g.scoreA, g.scoreB,
+      ),
+    ),
+  ]);
+  return (inserted.results[0] as { id: number }).id;
 }
 
-export function listTeams(): Team[] {
-  return db().prepare("SELECT id, name FROM teams ORDER BY name").all() as Team[];
+export function listTeams(): Promise<Team[]> {
+  return all<Team>("SELECT id, name FROM teams ORDER BY name");
 }
 
 /** Case-insensitive team lookup that tolerates partial names ("bounce" → "Bounce Philly"). */
-export function findTeam(query: string): Team | undefined {
+export async function findTeam(query: string): Promise<Team | undefined> {
   const q = query.trim().toLowerCase();
-  const teams = listTeams();
+  const teams = await listTeams();
   return teams.find((t) => t.name.toLowerCase() === q) ?? teams.find((t) => t.name.toLowerCase().includes(q));
 }
 
-export function teamPlayers(teamId: number): Player[] {
-  return db()
-    .prepare(
-      `SELECT p.id, p.name, p.gender, p.team_id AS teamId, t.name AS teamName
+export async function teamPlayers(teamId: number): Promise<Player[]> {
+  return all<Player>(
+    `SELECT p.id, p.name, p.gender, p.team_id AS teamId, t.name AS teamName
        FROM players p JOIN teams t ON t.id = p.team_id
        WHERE p.team_id = ? ORDER BY p.name`,
-    )
-    .all(teamId) as Player[];
+    teamId,
+  );
 }
 
-export function upcomingFixtures(teamId: number, fromDate: string): Fixture[] {
-  const rows = db()
-    .prepare(
-      `SELECT f.id, t.name AS opponent, f.opponent_id AS opponentId, f.play_on AS playOn, f.start_time AS startTime,
+export async function upcomingFixtures(teamId: number, fromDate: string): Promise<Fixture[]> {
+  const rows = await all<Omit<Fixture, "isHome"> & { isHome: number }>(
+    `SELECT f.id, t.name AS opponent, f.opponent_id AS opponentId, f.play_on AS playOn, f.start_time AS startTime,
               f.is_home AS isHome, f.division, f.location
        FROM fixtures f JOIN teams t ON t.id = f.opponent_id
        WHERE f.team_id = ? AND f.play_on >= ? ORDER BY f.play_on`,
-    )
-    .all(teamId, fromDate) as (Omit<Fixture, "isHome"> & { isHome: number })[];
+    teamId, fromDate,
+  );
   return rows.map((r) => ({ ...r, isHome: r.isHome === 1 }));
 }
 
-export function importedCplIds(): Set<string> {
-  const rows = db().prepare("SELECT cpl_id AS id FROM matches WHERE cpl_id IS NOT NULL").all() as { id: string }[];
+export async function importedCplIds(): Promise<Set<string>> {
+  const rows = await all<{ id: string }>("SELECT cpl_id AS id FROM matches WHERE cpl_id IS NOT NULL");
   return new Set(rows.map((r) => r.id));
 }
 
@@ -126,70 +135,69 @@ export function importedCplIds(): Set<string> {
  * Drops a hand-entered copy of a match CPL now provides (same two teams, within two days),
  * so it isn't counted twice.
  */
-export function deleteManualCopies(home: string, away: string, playedOn: string) {
-  db()
-    .prepare(
-      `DELETE FROM matches WHERE cpl_id IS NULL AND kind = 'league'
-         AND abs(julianday(played_on) - julianday(?)) <= 2
-         AND home_id IN (SELECT id FROM teams WHERE name IN (?, ?))
-         AND away_id IN (SELECT id FROM teams WHERE name IN (?, ?))`,
-    )
-    .run(playedOn, home, away, home, away);
+export async function deleteManualCopies(home: string, away: string, playedOn: string) {
+  await run(
+    `DELETE FROM matches WHERE cpl_id IS NULL AND kind = 'league'
+     AND abs(julianday(played_on) - julianday(?)) <= 2
+     AND home_id IN (SELECT id FROM teams WHERE name IN (?, ?))
+     AND away_id IN (SELECT id FROM teams WHERE name IN (?, ?))`,
+    playedOn, home, away, home, away,
+  );
 }
 
 /** Replaces a team's upcoming schedule with the given fixtures, all at once. */
-export function replaceUpcomingFixtures(team: string, fromDate: string, fixtures: FixtureInput[]) {
-  transaction(() => {
-    db().prepare("DELETE FROM fixtures WHERE team_id = ? AND play_on >= ?").run(upsertTeam(team), fromDate);
-    fixtures.forEach(upsertFixture);
-  });
-}
+export async function replaceUpcomingFixtures(team: string, fromDate: string, fixtures: FixtureInput[]) {
+  const teamIds = new Map<string, number>();
+  for (const name of [team, ...fixtures.flatMap((f) => [f.team, f.opponent])]) {
+    if (!teamIds.has(name)) teamIds.set(name, await upsertTeam(name));
+  }
 
-/** Inserts or refreshes a scheduled match. */
-export function upsertFixture(f: FixtureInput) {
-  db()
-    .prepare(
-      `INSERT INTO fixtures (team_id, opponent_id, play_on, start_time, is_home, division, location)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT (team_id, opponent_id, play_on) DO UPDATE SET
-         start_time = excluded.start_time, is_home = excluded.is_home,
-         division = excluded.division, location = excluded.location`,
-    )
-    .run(upsertTeam(f.team), upsertTeam(f.opponent), f.playOn, f.startTime, f.isHome ? 1 : 0, f.division, f.location);
+  await batch([
+    stmt("DELETE FROM fixtures WHERE team_id = ? AND play_on >= ?", teamIds.get(team)!, fromDate),
+    ...fixtures.map((f) =>
+      stmt(
+        `INSERT INTO fixtures (team_id, opponent_id, play_on, start_time, is_home, division, location)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (team_id, opponent_id, play_on) DO UPDATE SET
+           start_time = excluded.start_time, is_home = excluded.is_home,
+           division = excluded.division, location = excluded.location`,
+        teamIds.get(f.team)!, teamIds.get(f.opponent)!, f.playOn, f.startTime, f.isHome ? 1 : 0, f.division, f.location,
+      ),
+    ),
+  ]);
 }
 
 /** League results from our side of the net: games won and lost per match. */
-export function results(teamId: number): Result[] {
-  const rows = db()
-    .prepare(
-      `SELECT m.id AS matchId, m.played_on AS playedOn,
-              CASE WHEN m.home_id = :team THEN away.name ELSE home.name END AS opponent,
-              m.home_id = :team AS isHome,
-              sum(CASE WHEN (g.score_a > g.score_b) = (m.home_id = :team) THEN 1 ELSE 0 END) AS gamesWon,
-              sum(CASE WHEN (g.score_a > g.score_b) = (m.home_id = :team) THEN 0 ELSE 1 END) AS gamesLost
+export async function results(teamId: number): Promise<Result[]> {
+  const rows = await all<Omit<Result, "isHome"> & { isHome: number }>(
+    `SELECT m.id AS matchId, m.played_on AS playedOn,
+              CASE WHEN m.home_id = ?1 THEN away.name ELSE home.name END AS opponent,
+              m.home_id = ?1 AS isHome,
+              sum(CASE WHEN (g.score_a > g.score_b) = (m.home_id = ?1) THEN 1 ELSE 0 END) AS gamesWon,
+              sum(CASE WHEN (g.score_a > g.score_b) = (m.home_id = ?1) THEN 0 ELSE 1 END) AS gamesLost
        FROM matches m
        JOIN teams home ON home.id = m.home_id
        JOIN teams away ON away.id = m.away_id
        JOIN games g ON g.match_id = m.id
-       WHERE m.kind = 'league' AND :team IN (m.home_id, m.away_id)
+       WHERE m.kind = 'league' AND ?1 IN (m.home_id, m.away_id)
        GROUP BY m.id ORDER BY m.played_on DESC`,
-    )
-    .all({ team: teamId }) as (Omit<Result, "isHome"> & { isHome: number })[];
+    teamId,
+  );
   return rows.map((r) => ({ ...r, isHome: r.isHome === 1 }));
 }
 
 /** Every game of a match, with player names, oriented so `home` is the given team when it played. */
-export function matchGames(matchId: number, teamId?: number): GameDetail[] {
-  const rows = db()
-    .prepare(
-      `SELECT g.round, pa1.name AS a1, pa2.name AS a2, pb1.name AS b1, pb2.name AS b2,
+export async function matchGames(matchId: number, teamId?: number): Promise<GameDetail[]> {
+  const rows = await all<{
+    round: number | null; a1: string; a2: string; b1: string; b2: string; scoreA: number; scoreB: number; awayId: number;
+  }>(
+    `SELECT g.round, pa1.name AS a1, pa2.name AS a2, pb1.name AS b1, pb2.name AS b2,
               g.score_a AS scoreA, g.score_b AS scoreB, m.away_id AS awayId
        FROM games g JOIN matches m ON m.id = g.match_id
        JOIN players pa1 ON pa1.id = g.a1 JOIN players pa2 ON pa2.id = g.a2
        JOIN players pb1 ON pb1.id = g.b1 JOIN players pb2 ON pb2.id = g.b2
-       WHERE g.match_id = ? ORDER BY g.round, g.id`,
-    )
-    .all(matchId) as { round: number | null; a1: string; a2: string; b1: string; b2: string; scoreA: number; scoreB: number; awayId: number }[];
+       WHERE g.match_id = ? ORDER BY g.round, g.id`, matchId,
+  );
 
   return rows.map((r) => {
     const flip = teamId !== undefined && r.awayId === teamId;
@@ -212,20 +220,18 @@ export type PlayerGame = {
 };
 
 /** Every game a player has on file, from their side of the net. */
-export function playerGames(playerId: number): PlayerGame[] {
-  const rows = db()
-    .prepare(
-      `SELECT m.played_on AS playedOn, m.kind, g.round, g.score_a AS scoreA, g.score_b AS scoreB,
-              g.a1, g.a2, (SELECT name FROM players WHERE id = :p) AS me, pa1.name AS a1Name, pa2.name AS a2Name, pb1.name AS b1Name, pb2.name AS b2Name
+export async function playerGames(playerId: number): Promise<PlayerGame[]> {
+  const rows = await all<{
+    playedOn: string; kind: "league" | "practice"; round: number | null; scoreA: number; scoreB: number;
+    a1: number; a2: number; me: string; a1Name: string; a2Name: string; b1Name: string; b2Name: string;
+  }>(
+    `SELECT m.played_on AS playedOn, m.kind, g.round, g.score_a AS scoreA, g.score_b AS scoreB,
+              g.a1, g.a2, (SELECT name FROM players WHERE id = ?1) AS me, pa1.name AS a1Name, pa2.name AS a2Name, pb1.name AS b1Name, pb2.name AS b2Name
        FROM games g JOIN matches m ON m.id = g.match_id
        JOIN players pa1 ON pa1.id = g.a1 JOIN players pa2 ON pa2.id = g.a2
        JOIN players pb1 ON pb1.id = g.b1 JOIN players pb2 ON pb2.id = g.b2
-       WHERE :p IN (g.a1, g.a2, g.b1, g.b2) ORDER BY m.played_on, g.round`,
-    )
-    .all({ p: playerId }) as {
-    playedOn: string; kind: "league" | "practice"; round: number | null; scoreA: number; scoreB: number;
-    a1: number; a2: number; me: string; a1Name: string; a2Name: string; b1Name: string; b2Name: string;
-  }[];
+       WHERE ?1 IN (g.a1, g.a2, g.b1, g.b2) ORDER BY m.played_on, g.round`, playerId,
+  );
 
   return rows.map((r) => {
     const onA = r.a1 === playerId || r.a2 === playerId;
@@ -245,34 +251,34 @@ export function playerGames(playerId: number): PlayerGame[] {
   });
 }
 
-export function findPlayer(query: string): Player[] {
+export async function findPlayer(query: string): Promise<Player[]> {
   const q = query.trim().toLowerCase();
-  const all = db()
-    .prepare(
-      `SELECT p.id, p.name, p.gender, p.team_id AS teamId, t.name AS teamName
+  const players = await all<Player>(
+    `SELECT p.id, p.name, p.gender, p.team_id AS teamId, t.name AS teamName
        FROM players p JOIN teams t ON t.id = p.team_id ORDER BY p.name`,
-    )
-    .all() as Player[];
+  );
   return [
-    all.filter((p) => p.name.toLowerCase() === q),
-    all.filter((p) => p.name.toLowerCase().split(/\s+/).includes(q)),
-    all.filter((p) => p.name.toLowerCase().includes(q)),
+    players.filter((p) => p.name.toLowerCase() === q),
+    players.filter((p) => p.name.toLowerCase().split(/\s+/).includes(q)),
+    players.filter((p) => p.name.toLowerCase().includes(q)),
   ].find((m) => m.length > 0) ?? [];
 }
 
 export type PracticeSession = { matchId: number; playedOn: string; source: string; games: number };
 
-export function practiceSessions(teamId: number): PracticeSession[] {
-  return db()
-    .prepare(
-      `SELECT m.id AS matchId, m.played_on AS playedOn, m.source, count(g.id) AS games
+export async function practiceSessions(teamId: number): Promise<PracticeSession[]> {
+  return all<PracticeSession>(
+    `SELECT m.id AS matchId, m.played_on AS playedOn, m.source, count(g.id) AS games
        FROM matches m JOIN games g ON g.match_id = m.id
        WHERE m.kind = 'practice' AND m.home_id = ?
        GROUP BY m.id ORDER BY m.played_on DESC, m.id DESC`,
-    )
-    .all(teamId) as PracticeSession[];
+    teamId,
+  );
 }
 
-export function deletePracticeSession(teamId: number, matchId: number) {
-  db().prepare("DELETE FROM matches WHERE id = ? AND kind = 'practice' AND home_id = ?").run(matchId, teamId);
+export async function deletePracticeSession(teamId: number, matchId: number) {
+  await run(
+    "DELETE FROM matches WHERE id = ? AND kind = 'practice' AND home_id = ?",
+    matchId, teamId,
+  );
 }

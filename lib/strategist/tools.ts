@@ -19,7 +19,7 @@ type Tool<S extends z.ZodType> = {
   description: string;
   status: string;
   input: S;
-  run: (input: z.infer<S>, captain: Captain) => unknown;
+  run: (input: z.infer<S>, captain: Captain) => unknown | Promise<unknown>;
 };
 
 const tool = <S extends z.ZodType>(t: Tool<S>) => t;
@@ -31,13 +31,13 @@ const TOOLS = {
       "and past league results (games won-lost per match).",
     status: "Checking the schedule",
     input: z.object({}),
-    run: (_, captain) => ({
+    run: async (_, captain) => ({
       team: captain.teamName,
-      upcoming: upcomingFixtures(captain.teamId, leagueToday()).map((f) => ({
+      upcoming: (await upcomingFixtures(captain.teamId, leagueToday())).map((f) => ({
         ...f,
         lineupDeadline: lineupDeadline(f.playOn, f.isHome),
       })),
-      results: results(captain.teamId),
+      results: await results(captain.teamId),
     }),
   }),
 
@@ -45,10 +45,11 @@ const TOOLS = {
     description: "Players on a team with gender (F/M). Defaults to our team. Also lists every team in the league.",
     status: "Pulling the roster",
     input: z.object({ team: z.string().optional().describe("Team name; omit for our team") }),
-    run: ({ team }, captain) => {
-      const found = team ? findTeam(team) : { id: captain.teamId, name: captain.teamName };
-      if (!found) return { error: `No team matching "${team}".`, teams: listTeams().map((t) => t.name) };
-      return { team: found.name, players: teamPlayers(found.id).map(({ name, gender }) => ({ name, gender })) };
+    run: async ({ team }, captain) => {
+      const found = team ? await findTeam(team) : { id: captain.teamId, name: captain.teamName };
+      if (!found) return { error: `No team matching "${team}".`, teams: (await listTeams()).map((t) => t.name) };
+      const players = await teamPlayers(found.id);
+      return { team: found.name, players: players.map(({ name, gender }) => ({ name, gender })) };
     },
   }),
 
@@ -58,11 +59,11 @@ const TOOLS = {
       "Shows who each team paired together in every round.",
     status: "Reading match sheets",
     input: z.object({ opponent: z.string().optional() }),
-    run: ({ opponent }, captain) => {
-      const matches = results(captain.teamId).filter(
+    run: async ({ opponent }, captain) => {
+      const matches = (await results(captain.teamId)).filter(
         (r) => !opponent || r.opponent.toLowerCase().includes(opponent.trim().toLowerCase()),
       );
-      return matches.map((m) => ({ ...m, games: matchGames(m.matchId, captain.teamId) }));
+      return Promise.all(matches.map(async (m) => ({ ...m, games: await matchGames(m.matchId, captain.teamId) })));
     },
   }),
 
@@ -72,9 +73,9 @@ const TOOLS = {
       "(most frequent first, with format and record), and their strongest players by win rate.",
     status: "Scouting the opponent",
     input: z.object({ team: z.string() }),
-    run: ({ team }) => {
-      const found = findTeam(team);
-      if (!found) return { error: `No team matching "${team}".`, teams: listTeams().map((t) => t.name) };
+    run: async ({ team }) => {
+      const found = await findTeam(team);
+      if (!found) return { error: `No team matching "${team}".`, teams: (await listTeams()).map((t) => t.name) };
       return scoutingReport(found.id);
     },
   }),
@@ -92,13 +93,13 @@ const TOOLS = {
     description: "Every game on file for one player (league and practice): date, partner, opponents, score, result.",
     status: "Looking up player history",
     input: z.object({ player: z.string().describe("Full or partial name") }),
-    run: ({ player }) => {
-      const matches = findPlayer(player);
+    run: async ({ player }) => {
+      const matches = await findPlayer(player);
       if (matches.length !== 1) {
         return { error: matches.length ? `"${player}" is ambiguous` : `No player matching "${player}"`, candidates: matches.map((p) => p.name) };
       }
       const [p] = matches;
-      const games = playerGames(p.id);
+      const games = await playerGames(p.id);
       return { player: p.name, team: p.teamName, gender: p.gender, wins: games.filter((g) => g.won).length, games };
     },
   }),
@@ -116,13 +117,13 @@ export function toolStatus(name: string): string {
 }
 
 /** Validates the model's arguments against the tool's schema before running it. */
-export function runTool(name: string, input: unknown, captain: Captain): { output: unknown } | { error: string } {
+export async function runTool(name: string, input: unknown, captain: Captain): Promise<{ output: unknown } | { error: string }> {
   const t = TOOLS[name as ToolName] as Tool<z.ZodType> | undefined;
   if (!t) return { error: `Unknown tool ${name}` };
   const parsed = t.input.safeParse(input ?? {});
   if (!parsed.success) return { error: `Invalid input: ${parsed.error.message}` };
   try {
-    return { output: t.run(parsed.data, captain) };
+    return { output: await t.run(parsed.data, captain) };
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }

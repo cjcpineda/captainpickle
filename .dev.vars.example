@@ -1,0 +1,2 @@
+# Copy to .dev.vars for `npm run preview` (local Worker). For `npm run dev`, .env.local is used instead.
+GEMINI_API_KEY=your-key-here

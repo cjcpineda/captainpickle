@@ -23,7 +23,7 @@ export async function previewPractice(form: FormData): Promise<Preview | { error
   if (!(file instanceof File) || file.size === 0) return { error: "Choose a file to upload." };
   if (file.size > MAX_UPLOAD_BYTES) return { error: "That file is over 10 MB." };
 
-  const roster = teamPlayers(captain.teamId).map((p) => p.name);
+  const roster = (await teamPlayers(captain.teamId)).map((p) => p.name);
   let games: PracticeGame[];
   try {
     games = await readPracticeFile({ name: file.name, type: file.type, bytes: Buffer.from(await file.arrayBuffer()) }, roster);
@@ -57,13 +57,13 @@ export async function savePracticeGames(input: z.infer<typeof SaveInput>): Promi
   const parsed = SaveInput.safeParse(input);
   if (!parsed.success) return { error: "Those games didn't look right. Try uploading again." };
   const { fileName, fallbackDate, games } = parsed.data;
-  const sessions = savePractice(captain.teamName, games, fallbackDate, fileName);
+  const sessions = await savePractice(captain.teamName, games, fallbackDate, fileName);
   revalidatePath("/practice");
   return { sessions };
 }
 
 export async function deletePractice(matchId: number) {
   const captain = await requireCaptain();
-  deletePracticeSession(captain.teamId, matchId);
+  await deletePracticeSession(captain.teamId, matchId);
   revalidatePath("/practice");
 }
