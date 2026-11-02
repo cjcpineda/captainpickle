@@ -83,7 +83,12 @@ export async function syncFromCpl(team: string, divisionId = DEFAULT_DIVISION_ID
     const detail = await get<MatchupDetail>(`/divisions/${divisionId}/matchups/${m.matchupId}`);
     const match = toMatch(m, detail);
     await deleteManualCopies(match.home, match.away, match.playedOn);
-    await insertMatch(match);
+    try {
+      await insertMatch(match);
+    } catch (err) {
+      // Another sync running at the same time (the cron, or a captain's Sync now) saved it first.
+      if (!String(err).includes("UNIQUE constraint failed: matches.cpl_id")) throw err;
+    }
     await new Promise((r) => setTimeout(r, PAUSE_MS));
   }
 
