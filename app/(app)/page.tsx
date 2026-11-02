@@ -7,10 +7,12 @@ import { matchGames, results, upcomingFixtures, type Fixture, type Result } from
 
 export default async function SchedulePage() {
   const captain = await requireCaptain();
-  const upcoming = upcomingFixtures(captain.teamId, leagueToday());
-  const played = results(captain.teamId);
+  const [upcoming, played, synced] = await Promise.all([
+    upcomingFixtures(captain.teamId, leagueToday()),
+    results(captain.teamId),
+    lastSyncedAt(),
+  ]);
   const [next] = upcoming;
-  const synced = lastSyncedAt();
 
   return (
     <>
@@ -127,9 +129,9 @@ function DateChip({ iso }: { iso: string }) {
   );
 }
 
-function ResultRow({ result, teamId }: { result: Result; teamId: number }) {
+async function ResultRow({ result, teamId }: { result: Result; teamId: number }) {
   const outcome = result.gamesWon > result.gamesLost ? "w" : result.gamesWon < result.gamesLost ? "l" : "t";
-  const games = matchGames(result.matchId, teamId);
+  const games = await matchGames(result.matchId, teamId);
   return (
     <li>
       <details className="result-row">

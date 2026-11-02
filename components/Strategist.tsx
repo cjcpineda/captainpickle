@@ -7,10 +7,10 @@ import { Chat } from "./Chat.tsx";
 
 type Props = { captain: Captain; chatId: number | null; prompt?: string };
 
-export function Strategist({ captain, chatId, prompt }: Props) {
-  const messages = chatId === null ? [] : loadMessages(captain.id, chatId);
+export async function Strategist({ captain, chatId, prompt }: Props) {
+  const messages = chatId === null ? [] : await loadMessages(captain.id, chatId);
   if (!messages) notFound();
-  const chats = listChats(captain.id);
+  const chats = await listChats(captain.id);
 
   return (
     <div className="chat-layout">

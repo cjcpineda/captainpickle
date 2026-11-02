@@ -9,7 +9,7 @@ const FORMAT_LABEL: Record<Format, string> = { mixed: "Mixed", womens: "Women's"
 
 export default async function ScoutingPage({ searchParams }: { searchParams: Promise<{ team?: string }> }) {
   const [captain, { team }] = await Promise.all([requireCaptain(), searchParams]);
-  const fixtures = upcomingFixtures(captain.teamId, leagueToday());
+  const fixtures = await upcomingFixtures(captain.teamId, leagueToday());
   const fixture = team ? fixtures.find((f) => f.opponentId === Number(team)) : fixtures[0];
   const opponentId = fixture?.opponentId ?? (team ? Number(team) : null);
 
@@ -17,7 +17,7 @@ export default async function ScoutingPage({ searchParams }: { searchParams: Pro
     return <p className="empty card">No upcoming opponent to scout.</p>;
   }
 
-  const report = scoutingReport(opponentId);
+  const report = await scoutingReport(opponentId);
   const ask = `Give me recommended counter-pairings for all eight rounds against ${report.team}, based on their likely pairs and strongest players.`;
 
   return (

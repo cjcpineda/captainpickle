@@ -1,31 +1,28 @@
 import type { Content } from "@google/genai";
-import { db } from "./db.ts";
+import { all, get, run } from "./db.ts";
 
 export type Message = Content;
 export type ChatSummary = { id: number; title: string; updatedAt: string };
 
-export function listChats(captainId: number): ChatSummary[] {
-  return db()
-    .prepare("SELECT id, title, updated_at AS updatedAt FROM chats WHERE captain_id = ? ORDER BY updated_at DESC LIMIT 30")
-    .all(captainId) as ChatSummary[];
+export function listChats(captainId: number): Promise<ChatSummary[]> {
+  return all<ChatSummary>(
+    "SELECT id, title, updated_at AS updatedAt FROM chats WHERE captain_id = ? ORDER BY updated_at DESC LIMIT 30",
+    captainId,
+  );
 }
 
-export function createChat(captainId: number, title: string): number {
-  const { lastInsertRowid } = db().prepare("INSERT INTO chats (captain_id, title) VALUES (?, ?)").run(captainId, title.slice(0, 80));
-  return Number(lastInsertRowid);
+export async function createChat(captainId: number, title: string): Promise<number> {
+  const row = await get<{ id: number }>("INSERT INTO chats (captain_id, title) VALUES (?, ?) RETURNING id", captainId, title.slice(0, 80));
+  return row!.id;
 }
 
-export function loadMessages(captainId: number, chatId: number): Message[] | null {
-  const row = db().prepare("SELECT messages FROM chats WHERE id = ? AND captain_id = ?").get(chatId, captainId) as
-    | { messages: string }
-    | undefined;
+export async function loadMessages(captainId: number, chatId: number): Promise<Message[] | null> {
+  const row = await get<{ messages: string }>("SELECT messages FROM chats WHERE id = ? AND captain_id = ?", chatId, captainId);
   return row ? (JSON.parse(row.messages) as unknown[]).flatMap(upgradeLegacy) : null;
 }
 
-export function saveMessages(chatId: number, messages: Message[]) {
-  db()
-    .prepare("UPDATE chats SET messages = ?, updated_at = datetime('now') WHERE id = ?")
-    .run(JSON.stringify(messages), chatId);
+export async function saveMessages(chatId: number, messages: Message[]) {
+  await run("UPDATE chats SET messages = ?, updated_at = datetime('now') WHERE id = ?", JSON.stringify(messages), chatId);
 }
 
 /** Chats saved before the switch to Gemini used { role, content }; keep their plain-text turns. */

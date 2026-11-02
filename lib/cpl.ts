@@ -71,10 +71,10 @@ export async function syncFromCpl(team: string, divisionId = DEFAULT_DIVISION_ID
       division,
       location: m.address,
     }));
-  replaceUpcomingFixtures(team, today, upcoming);
+  await replaceUpcomingFixtures(team, today, upcoming);
 
   const scouted = new Set([team, ...upcoming.map((f) => f.opponent)]);
-  const known = importedCplIds();
+  const known = await importedCplIds();
   const toImport = matchups.filter(
     (m) => m.endResult && !known.has(m.matchupId) && (scouted.has(m.homeName) || scouted.has(m.awayName)),
   );
@@ -82,12 +82,12 @@ export async function syncFromCpl(team: string, divisionId = DEFAULT_DIVISION_ID
   for (const m of toImport) {
     const detail = await get<MatchupDetail>(`/divisions/${divisionId}/matchups/${m.matchupId}`);
     const match = toMatch(m, detail);
-    deleteManualCopies(match.home, match.away, match.playedOn);
-    insertMatch(match);
+    await deleteManualCopies(match.home, match.away, match.playedOn);
+    await insertMatch(match);
     await new Promise((r) => setTimeout(r, PAUSE_MS));
   }
 
-  setMeta("cpl_synced_at", new Date().toISOString());
+  await setMeta("cpl_synced_at", new Date().toISOString());
   return { division, fixtures: upcoming.length, imported: toImport.length };
 }
 

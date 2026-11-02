@@ -1,0 +1,25 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "captainpickle",
+  // custom-worker.ts wraps the Next.js app (built by OpenNext) and adds the CPL sync cron.
+  "main": "custom-worker.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": { "directory": ".open-next/assets", "binding": "ASSETS" },
+  "services": [{ "binding": "WORKER_SELF_REFERENCE", "service": "captainpickle" }],
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "captainpickle",
+      // Replace with the id printed by `npx wrangler d1 create captainpickle`.
+      "database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  // Pull the CPL schedule and results every 6 hours.
+  "triggers": { "crons": ["0 */6 * * *"] },
+
+  "observability": { "enabled": true }
+}

@@ -10,8 +10,8 @@ const MIN_GAMES = 2;
 
 export default async function PracticePage() {
   const captain = await requireCaptain();
-  const sessions = practiceSessions(captain.teamId);
-  const pairs = bestPairs(pairRecords(captain.teamId));
+  const [sessions, records] = await Promise.all([practiceSessions(captain.teamId), pairRecords(captain.teamId)]);
+  const pairs = bestPairs(records);
 
   return (
     <>
