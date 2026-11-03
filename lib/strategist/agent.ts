@@ -1,7 +1,6 @@
-import type { Part } from "@google/genai";
+import { chat, MODEL, type ChatMessage, type ToolCall } from "../ai.ts";
 import type { Captain } from "../auth.ts";
 import { createChat, loadMessages, saveMessages, type Message } from "../chats.ts";
-import { gemini, MODEL } from "../gemini.ts";
 import { runTool, toolDefinitions, toolStatus } from "./tools.ts";
 import type { ChatEvent, TranscriptItem } from "./view.ts";
 
@@ -31,59 +30,64 @@ export async function runStrategist(captain: Captain, chatId: number | null, tex
   if (!messages) throw new Error("Chat not found.");
   emit({ type: "chat", id });
 
-  messages.push({ role: "user", parts: [{ text }] });
+  messages.push({ role: "user", content: text });
   await saveMessages(id, messages);
 
   const context = `Captain: ${captain.name}. Team: ${captain.teamName}. Today: ${new Date().toDateString()}.`;
+  const system: ChatMessage = { role: "system", content: `${SYSTEM}\n\n${context}` };
 
-  for (let step = 0; step < MAX_STEPS; step++) {
-    const stream = await gemini().models.generateContentStream({
-      model: MODEL,
-      contents: messages,
-      config: {
-        systemInstruction: `${SYSTEM}\n\n${context}`,
-        tools: [{ functionDeclarations: toolDefinitions }],
-      },
-    });
-
-    // Keep every part as returned (thought signatures included); Gemini needs them back on the next turn.
-    const parts: Part[] = [];
-    for await (const chunk of stream) {
-      for (const part of chunk.candidates?.[0]?.content?.parts ?? []) {
-        if (part.text && !part.thought) emit({ type: "text", delta: part.text });
-        parts.push(part);
-      }
-    }
-    if (parts.length === 0) {
-      emit({ type: "error", message: "The strategist couldn't answer that one. Try rephrasing." });
+  for (let step = 0; ; step++) {
+    if (step === MAX_STEPS) {
+      emit({ type: "error", message: "The strategist ran out of steps on that one. Try a narrower question." });
       break;
     }
-    messages.push({ role: "model", parts });
-    await saveMessages(id, messages);
+    const reply = await chat({ messages: [system, ...messages], tools: toolDefinitions, max_tokens: 4096 });
+    const calls = (reply.tool_calls ?? []).filter((c): c is ToolCall => c.type === "function");
+    const content = visibleText(reply.content);
 
-    const calls = parts.flatMap((p) => (p.functionCall ? [p.functionCall] : []));
+    if (!content && calls.length === 0) {
+      emit({ type: "error", message: `The strategist (${MODEL}) couldn't answer that one. Try rephrasing.` });
+      break;
+    }
+    if (content) emit({ type: "text", delta: content });
+    messages.push({ role: "assistant", content: content || null, ...(calls.length ? { tool_calls: calls } : {}) });
+    await saveMessages(id, messages);
     if (calls.length === 0) break;
 
-    const responses: Part[] = [];
     for (const call of calls) {
-      const name = call.name ?? "";
-      emit({ type: "status", label: toolStatus(name) });
-      responses.push({ functionResponse: { id: call.id, name, response: await runTool(name, call.args, captain) } });
+      emit({ type: "status", label: toolStatus(call.function.name) });
+      const result = await runTool(call.function.name, parseArgs(call.function.arguments), captain);
+      messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify(result) });
     }
-    messages.push({ role: "user", parts: responses });
     await saveMessages(id, messages);
   }
 
   emit({ type: "done" });
 }
 
+function parseArgs(args: unknown): unknown {
+  if (typeof args !== "string") return args ?? {};
+  try {
+    return args.trim() ? JSON.parse(args) : {};
+  } catch {
+    return {};
+  }
+}
+
+/** The answer text, minus any reasoning a model inlined in <think> tags. */
+function visibleText(content: unknown): string {
+  const text = typeof content === "string" ? content : Array.isArray(content) ? content.map((p) => p?.text ?? "").join("") : "";
+  return text.replace(/<think>[\s\S]*?<\/think>/g, "").replace(/^[\s\S]*<\/think>/, "").trim();
+}
+
 /** The visible conversation: captain messages and the strategist's prose, minus tool plumbing. */
 export function transcript(messages: Message[]): TranscriptItem[] {
   const items: TranscriptItem[] = [];
   for (const m of messages) {
-    const text = (m.parts ?? []).flatMap((p) => (p.text && !p.thought ? [p.text] : [])).join("");
+    if (m.role !== "user" && m.role !== "assistant") continue;
+    const text = m.role === "assistant" ? visibleText(m.content) : typeof m.content === "string" ? m.content : "";
     if (!text) continue;
-    const role = m.role === "model" ? "ai" : "captain";
+    const role = m.role === "assistant" ? "ai" : "captain";
     const last = items.at(-1);
     if (last?.role === "ai" && role === "ai") last.text += `\n\n${text}`;
     else items.push({ role, text });

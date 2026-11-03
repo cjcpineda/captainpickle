@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireCaptain } from "@/lib/auth.ts";
-import { describeAiError } from "@/lib/gemini.ts";
+import { describeAiError } from "@/lib/ai.ts";
 import {
   matchToRoster,
   MAX_UPLOAD_BYTES,

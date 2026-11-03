@@ -4,7 +4,7 @@ AI lineup strategist for Cross Club Pickleball captains.
 
 ## Setup
 
-**Requires:** Node 22.13+ and a [Gemini API key](https://aistudio.google.com/apikey)
+**Requires:** Node 22.13+ and a Cloudflare account (the AI runs on Workers AI; no API key)
 
 ```bash
 git clone https://github.com/cjcpineda/captainpickle.git
@@ -13,7 +13,11 @@ npm install
 cp .dev.vars.example .env
 ```
 
-Open `.env` and set `GEMINI_API_KEY`.
+Log in to Cloudflare once. Workers AI always runs on Cloudflare, even when the rest of the app runs on your computer:
+
+```bash
+npx wrangler login
+```
 
 Create the local database:
 
@@ -50,7 +54,6 @@ The app runs on Cloudflare Workers, with its data in D1 (Cloudflare's SQLite). T
 npx wrangler login
 npx wrangler d1 create captainpickle      # paste the printed database_id into wrangler.jsonc
 npm run db:migrate:remote
-npx wrangler secret put GEMINI_API_KEY
 npm run deploy
 npm run captain -- you@example.com "Your Name" "Your Team Name" yourpassword --remote
 ```
