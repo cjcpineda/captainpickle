@@ -22,7 +22,16 @@ export function describeAiError(err: unknown): string {
   if (err instanceof ApiError) {
     if (err.status === 429) return "Gemini's free-tier limit was reached. Wait a minute and try again.";
     if ([400, 401, 403].includes(err.status) && /key/i.test(err.message)) return "Gemini rejected the API key. Check GEMINI_API_KEY.";
-    return "The AI service had a problem. Try again.";
+    if (err.status === 503) return "Gemini is overloaded right now. Wait a moment and try again.";
+    if (err.status === 404) return `Gemini doesn't know the model "${MODEL}". Check GEMINI_MODEL.`;
+    return `The AI service had a problem (Gemini ${err.status}: ${geminiMessage(err)}). Try again.`;
   }
   return "Something went wrong. Try again.";
+}
+
+/** Gemini's own explanation, pulled out of the JSON body the SDK puts in the error message. */
+function geminiMessage(err: ApiError): string {
+  const match = err.message.match(/"message":\s*"((?:[^"\\]|\\.)*)"/);
+  const text = match ? match[1].replace(/\\n/g, " ").replace(/\\"/g, '"') : err.message;
+  return text.length > 200 ? `${text.slice(0, 200)}…` : text;
 }
