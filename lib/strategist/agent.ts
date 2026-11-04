@@ -1,7 +1,7 @@
 import type { Part } from "@google/genai";
 import type { Captain } from "../auth.ts";
 import { createChat, loadMessages, saveMessages, type Message } from "../chats.ts";
-import { gemini, MODEL } from "../gemini.ts";
+import { gemini, MODEL, withRetry } from "../gemini.ts";
 import { runTool, toolDefinitions, toolStatus } from "./tools.ts";
 import type { ChatEvent, TranscriptItem } from "./view.ts";
 
@@ -27,8 +27,9 @@ type Emit = (event: ChatEvent) => void;
 
 export async function runStrategist(captain: Captain, chatId: number | null, text: string, emit: Emit) {
   const id = chatId ?? (await createChat(captain.id, text));
-  const messages = await loadMessages(captain.id, id);
-  if (!messages) throw new Error("Chat not found.");
+  const loaded = await loadMessages(captain.id, id);
+  if (!loaded) throw new Error("Chat not found.");
+  const messages = dropDanglingCalls(loaded);
   emit({ type: "chat", id });
 
   messages.push({ role: "user", parts: [{ text }] });
@@ -37,14 +38,16 @@ export async function runStrategist(captain: Captain, chatId: number | null, tex
   const context = `Captain: ${captain.name}. Team: ${captain.teamName}. Today: ${new Date().toDateString()}.`;
 
   for (let step = 0; step < MAX_STEPS; step++) {
-    const stream = await gemini().models.generateContentStream({
-      model: MODEL,
-      contents: messages,
-      config: {
-        systemInstruction: `${SYSTEM}\n\n${context}`,
-        tools: [{ functionDeclarations: toolDefinitions }],
-      },
-    });
+    const stream = await withRetry(() =>
+      gemini().models.generateContentStream({
+        model: MODEL,
+        contents: messages,
+        config: {
+          systemInstruction: `${SYSTEM}\n\n${context}`,
+          tools: [{ functionDeclarations: toolDefinitions }],
+        },
+      }),
+    );
 
     // Keep every part as returned (thought signatures included); Gemini needs them back on the next turn.
     const parts: Part[] = [];
@@ -75,6 +78,18 @@ export async function runStrategist(captain: Captain, chatId: number | null, tex
   }
 
   emit({ type: "done" });
+}
+
+/**
+ * If a turn died between Gemini asking for tools and us answering (a timeout, a crash), the saved chat
+ * ends with function calls that have no responses, and Gemini rejects every later request in that chat.
+ * Drop those unanswered calls so the chat keeps working.
+ */
+export function dropDanglingCalls(messages: Message[]): Message[] {
+  return messages.filter((m, i) => {
+    if (m.role !== "model" || !m.parts?.some((p) => p.functionCall)) return true;
+    return messages[i + 1]?.parts?.some((p) => p.functionResponse) ?? false;
+  });
 }
 
 /** The visible conversation: captain messages and the strategist's prose, minus tool plumbing. */
