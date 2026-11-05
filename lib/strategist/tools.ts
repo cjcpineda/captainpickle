@@ -1,6 +1,6 @@
 /** The league database, as tools the strategist can call. Every number it quotes comes from here. */
-import type { FunctionDeclaration } from "@google/genai";
 import { z } from "zod";
+import type { ToolDefinition } from "../ai.ts";
 import type { Captain } from "../auth.ts";
 import { leagueToday, lineupDeadline } from "../deadline.ts";
 import { pairRecords, scoutingReport } from "../scouting.ts";
@@ -107,9 +107,9 @@ const TOOLS = {
 
 type ToolName = keyof typeof TOOLS;
 
-export const toolDefinitions: FunctionDeclaration[] = Object.entries(TOOLS).map(([name, t]) => {
-  const { $schema, ...schema } = z.toJSONSchema(t.input) as Record<string, unknown>;
-  return { name, description: t.description, parametersJsonSchema: schema };
+export const toolDefinitions: ToolDefinition[] = Object.entries(TOOLS).map(([name, t]) => {
+  const { $schema, ...parameters } = z.toJSONSchema(t.input) as Record<string, unknown>;
+  return { type: "function", function: { name, description: t.description, parameters } };
 });
 
 export function toolStatus(name: string): string {
