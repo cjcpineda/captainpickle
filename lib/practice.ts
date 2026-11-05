@@ -2,11 +2,11 @@
  * Practice data: captains upload a file of practice games, check how it was read, then save it.
  *
  * A CSV in our template is read directly. Anything else (another spreadsheet layout, a PDF,
- * a photo of a scoresheet, notes) goes to Gemini, which pulls out the games.
+ * a photo of a scoresheet, notes) goes to Workers AI, which pulls out the games.
  */
 import { z } from "zod";
 import { parseCsv } from "./csv.ts";
-import { gemini, MODEL } from "./gemini.ts";
+import { chat, toText, VISION_MODEL, type ChatMessage } from "./ai.ts";
 import { insertMatch } from "./repo.ts";
 
 export const TEMPLATE_COLUMNS = ["date", "player_a1", "player_a2", "player_b1", "player_b2", "score_a", "score_b"];
@@ -35,8 +35,11 @@ export async function readPracticeFile(file: Upload, roster: string[]): Promise<
     const text = file.bytes.toString("utf8");
     return readTemplateCsv(text) ?? extractWithAi({ text }, roster);
   }
+  if (file.type === "application/pdf") {
+    return extractWithAi({ text: await toText(file.name, file.type, file.bytes) }, roster);
+  }
   if (AI_READABLE.has(file.type)) {
-    return extractWithAi({ inlineData: { mimeType: file.type, data: file.bytes.toString("base64") } }, roster);
+    return extractWithAi({ image: `data:${file.type};base64,${file.bytes.toString("base64")}` }, roster);
   }
   throw new PracticeFileError("Upload a CSV, text file, PDF, or photo. For Excel, use File → Save As → CSV.");
 }
@@ -75,28 +78,22 @@ const Extracted = z.object({
   ),
 });
 
-async function extractWithAi(content: { text: string } | { inlineData: { mimeType: string; data: string } }, roster: string[]) {
+async function extractWithAi(content: { text: string } | { image: string }, roster: string[]) {
   const { $schema, ...schema } = z.toJSONSchema(Extracted) as Record<string, unknown>;
-  const response = await gemini().models.generateContent({
-    model: MODEL,
-    contents: [
-      {
-        role: "user",
-        parts: [
-          content,
-          {
-            text:
-              "This file records pickleball doubles practice games among teammates. Extract every game that has a final score. " +
-              "Skip games without a score. When a name clearly refers to someone on this roster, use the roster spelling: " +
-              roster.join(", "),
-          },
-        ],
-      },
-    ],
-    config: { responseMimeType: "application/json", responseJsonSchema: schema },
-  });
-
-  const parsed = Extracted.safeParse(parseJson(response.text));
+  const instructions =
+    "This file records pickleball doubles practice games among teammates. Extract every game that has a final score. " +
+    "Skip games without a score. When a name clearly refers to someone on this roster, use the roster spelling: " +
+    roster.join(", ") +
+    '\n\nAnswer with JSON only, shaped like {"games":[{"date":"YYYY-MM-DD" or null,"team_a":["",""],"team_b":["",""],"score_a":0,"score_b":0}]}.';
+  const message: ChatMessage =
+    "image" in content
+      ? { role: "user", content: [{ type: "text", text: instructions }, { type: "image_url", image_url: { url: content.image } }] }
+      : { role: "user", content: `${instructions}\n\nFile:\n${content.text.slice(0, 60_000)}` };
+  const reply = await chat(
+    { messages: [message], response_format: { type: "json_schema", json_schema: { name: "practice_games", schema } }, max_tokens: 8192 },
+    "image" in content ? VISION_MODEL : undefined,
+  );
+  const parsed = Extracted.safeParse(parseJson(reply.content));
   if (!parsed.success) throw new PracticeFileError("Couldn't read games from that file. Try the CSV template instead.");
 
   return parsed.data.games.flatMap((g) => {
@@ -146,9 +143,13 @@ export async function savePractice(team: string, games: PracticeGame[], fallback
   return byDate.size;
 }
 
-function parseJson(text: string | undefined): unknown {
+/** The model's JSON answer; some models return it parsed, some wrap it in a ``` fence. */
+function parseJson(content: unknown): unknown {
+  if (typeof content !== "string") return content;
+  const text = content.replace(/<think>[\s\S]*?<\/think>/g, "");
+  const json = text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1);
   try {
-    return JSON.parse(text ?? "");
+    return JSON.parse(json);
   } catch {
     return null;
   }

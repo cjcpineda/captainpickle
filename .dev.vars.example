@@ -1,2 +1,4 @@
 # Copy to .dev.vars for `npm run preview` (local Worker). For `npm run dev`, .env is used instead.
-GEMINI_API_KEY=your-key-here
+# All optional. The AI runs on Workers AI through the AI binding, so no API key is needed.
+# AI_MODEL=@cf/moonshotai/kimi-k2.6
+# CPL_DIVISION_ID=

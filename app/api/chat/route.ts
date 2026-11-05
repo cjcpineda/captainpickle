@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { currentCaptain } from "@/lib/auth.ts";
-import { describeAiError } from "@/lib/gemini.ts";
+import { describeAiError } from "@/lib/ai.ts";
 import { runStrategist } from "@/lib/strategist/agent.ts";
 import type { ChatEvent } from "@/lib/strategist/view.ts";
 

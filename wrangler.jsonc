@@ -18,6 +18,10 @@
 			"service": "captainpickle"
 		}
 	],
+	// Workers AI runs the strategist (lib/ai.ts). No API key: usage is billed to this Cloudflare account.
+	"ai": {
+		"binding": "AI"
+	},
 	"d1_databases": [
 		{
 			"binding": "DB",

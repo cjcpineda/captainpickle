@@ -1,7 +1,7 @@
-import type { Content } from "@google/genai";
+import type { ChatMessage } from "./ai.ts";
 import { all, get, run } from "./db.ts";
 
-export type Message = Content;
+export type Message = ChatMessage;
 export type ChatSummary = { id: number; title: string; updatedAt: string };
 
 export function listChats(captainId: number): Promise<ChatSummary[]> {
@@ -25,10 +25,14 @@ export async function saveMessages(chatId: number, messages: Message[]) {
   await run("UPDATE chats SET messages = ?, updated_at = datetime('now') WHERE id = ?", JSON.stringify(messages), chatId);
 }
 
-/** Chats saved before the switch to Gemini used { role, content }; keep their plain-text turns. */
+/**
+ * Chats saved while the strategist ran on Gemini used { role: "user" | "model", parts }; keep their
+ * plain-text turns and drop the tool plumbing, which Workers AI can't replay.
+ */
 function upgradeLegacy(m: unknown): Message[] {
-  const legacy = m as { role?: string; content?: unknown; parts?: unknown };
-  if (legacy.parts) return [m as Message];
-  if (typeof legacy.content !== "string") return [];
-  return [{ role: legacy.role === "assistant" ? "model" : "user", parts: [{ text: legacy.content }] }];
+  const legacy = m as { role?: string; parts?: { text?: string; thought?: boolean }[] };
+  if (!legacy.parts) return [m as Message];
+  const text = legacy.parts.flatMap((p) => (p.text && !p.thought ? [p.text] : [])).join("");
+  if (!text) return [];
+  return [legacy.role === "model" ? { role: "assistant", content: text } : { role: "user", content: text }];
 }
