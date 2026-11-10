@@ -1,7 +1,7 @@
 import { requireCaptain } from "@/lib/auth.ts";
 import { monthDay, weekday } from "@/lib/dates.ts";
 import { practiceSessions } from "@/lib/repo.ts";
-import { pairRecords, type PairRecord, type WinLoss } from "@/lib/scouting.ts";
+import { pairRecords, playerRecords, type PairRecord, type PlayerRecord, type WinLoss } from "@/lib/scouting.ts";
 import { PracticeUpload } from "@/components/PracticeUpload.tsx";
 import { deletePractice } from "./actions.ts";
 
@@ -10,8 +10,13 @@ const MIN_GAMES = 2;
 
 export default async function PracticePage() {
   const captain = await requireCaptain();
-  const [sessions, records] = await Promise.all([practiceSessions(captain.teamId), pairRecords(captain.teamId)]);
+  const [sessions, records, playerStats] = await Promise.all([
+    practiceSessions(captain.teamId),
+    pairRecords(captain.teamId),
+    playerRecords(captain.teamId, "practice"),
+  ]);
   const pairs = bestPairs(records);
+  const players = rankPlayers(playerStats);
 
   return (
     <>
@@ -68,6 +73,41 @@ export default async function PracticePage() {
               </table>
             )}
           </section>
+
+          <section className="card">
+            <div className="card-head">
+              <h2>Player records</h2>
+              <span className="sub">Practice games, best first</span>
+            </div>
+            {players.length === 0 ? (
+              <p className="empty">No practice games yet.</p>
+            ) : (
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Player</th>
+                    <th>W–L</th>
+                    <th>Win %</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {players.map((p, i) => (
+                    <tr key={p.name}>
+                      <td className="num">{i + 1}</td>
+                      <td>
+                        <b>{p.name}</b> {p.gender && <span className="sub">{p.gender}</span>}
+                      </td>
+                      <td>
+                        {p.wins}–{p.games - p.wins}
+                      </td>
+                      <td className="num">{Math.round((100 * p.wins) / p.games)}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </section>
         </div>
 
         <aside className="card">
@@ -116,6 +156,11 @@ function bestPairs(pairs: PairRecord[]): PairRecord[] {
     .filter((p) => total(p).games >= MIN_GAMES)
     .sort((x, y) => smoothedWinRate(total(y)) - smoothedWinRate(total(x)))
     .slice(0, 15);
+}
+
+/** Highest win percentage first; ties go to whoever has more wins. */
+function rankPlayers(players: PlayerRecord[]): PlayerRecord[] {
+  return [...players].sort((a, b) => b.wins / b.games - a.wins / a.games || b.wins - a.wins || a.name.localeCompare(b.name));
 }
 
 /** Win rate pulled toward 50% for small samples, so 2–0 doesn't outrank 12–2. */

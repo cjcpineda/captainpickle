@@ -131,3 +131,22 @@ export async function pairRecords(teamId: number): Promise<PairRecord[]> {
     practice: { games: r.pg, wins: r.pw, pointDiff: r.pd },
   }));
 }
+
+export type PlayerRecord = { name: string; gender: Gender | null; games: number; wins: number };
+
+/** Each player on a team with their win–loss across games of one kind (league or practice). Players with no games are left out. */
+export async function playerRecords(teamId: number, kind: "league" | "practice"): Promise<PlayerRecord[]> {
+  return all<PlayerRecord>(
+    `WITH sides AS (
+         SELECT g.a1 AS p1, g.a2 AS p2, g.score_a > g.score_b AS won FROM games g JOIN matches m ON m.id = g.match_id WHERE m.kind = ?2
+         UNION ALL
+         SELECT g.b1, g.b2, g.score_b > g.score_a FROM games g JOIN matches m ON m.id = g.match_id WHERE m.kind = ?2),
+       appearances AS (SELECT p1 AS id, won FROM sides UNION ALL SELECT p2, won FROM sides)
+       SELECT p.name, p.gender, count(*) AS games, sum(a.won) AS wins
+       FROM players p JOIN appearances a ON a.id = p.id
+       WHERE p.team_id = ?1
+       GROUP BY p.id`,
+    teamId,
+    kind,
+  );
+}
