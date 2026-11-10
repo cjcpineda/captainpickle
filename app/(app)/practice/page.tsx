@@ -1,7 +1,8 @@
 import { requireCaptain } from "@/lib/auth.ts";
 import { monthDay, weekday } from "@/lib/dates.ts";
 import { practiceSessions } from "@/lib/repo.ts";
-import { pairRecords, playerRecords, type PairRecord, type PlayerRecord, type WinLoss } from "@/lib/scouting.ts";
+import { cplPlayerRecords, type CplPlayerRecord } from "@/lib/cpl.ts";
+import { pairRecords, type PairRecord, type WinLoss } from "@/lib/scouting.ts";
 import { PracticeUpload } from "@/components/PracticeUpload.tsx";
 import { deletePractice } from "./actions.ts";
 
@@ -13,7 +14,7 @@ export default async function PracticePage() {
   const [sessions, records, playerStats] = await Promise.all([
     practiceSessions(captain.teamId),
     pairRecords(captain.teamId),
-    playerRecords(captain.teamId, "practice"),
+    cplPlayerRecords(captain.teamName),
   ]);
   const pairs = bestPairs(records);
   const players = rankPlayers(playerStats);
@@ -77,10 +78,10 @@ export default async function PracticePage() {
           <section className="card">
             <div className="card-head">
               <h2>Player records</h2>
-              <span className="sub">Practice games, best first</span>
+              <span className="sub">CPL league games, best first</span>
             </div>
             {players.length === 0 ? (
-              <p className="empty">No practice games yet.</p>
+              <p className="empty">No records yet. Sync from CPL on the Schedule page to load them.</p>
             ) : (
               <table className="table">
                 <thead>
@@ -99,9 +100,9 @@ export default async function PracticePage() {
                         <b>{p.name}</b> {p.gender && <span className="sub">{p.gender}</span>}
                       </td>
                       <td>
-                        {p.wins}–{p.games - p.wins}
+                        {p.wins}–{p.losses}
                       </td>
-                      <td className="num">{Math.round((100 * p.wins) / p.games)}%</td>
+                      <td className="num">{winPct(p)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -158,9 +159,14 @@ function bestPairs(pairs: PairRecord[]): PairRecord[] {
     .slice(0, 15);
 }
 
-/** Highest win percentage first; ties go to whoever has more wins. */
-function rankPlayers(players: PlayerRecord[]): PlayerRecord[] {
-  return [...players].sort((a, b) => b.wins / b.games - a.wins / a.games || b.wins - a.wins || a.name.localeCompare(b.name));
+/** Highest win percentage first; ties go to whoever has more wins. Players with no games go last. */
+function rankPlayers(players: CplPlayerRecord[]): CplPlayerRecord[] {
+  const rate = (p: CplPlayerRecord) => (p.wins + p.losses === 0 ? -1 : p.wins / (p.wins + p.losses));
+  return [...players].sort((a, b) => rate(b) - rate(a) || b.wins - a.wins || a.name.localeCompare(b.name));
+}
+
+function winPct({ wins, losses }: CplPlayerRecord): string {
+  return wins + losses === 0 ? "–" : `${Math.round((100 * wins) / (wins + losses))}%`;
 }
 
 /** Win rate pulled toward 50% for small samples, so 2–0 doesn't outrank 12–2. */

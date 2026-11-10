@@ -4,7 +4,8 @@
  * crossclubpickleball.com is a single-page app; its data comes from a public, read-only JSON API
  * (the same requests a browser makes when you open the Lineups page). We pull:
  *   - our upcoming schedule, which becomes the fixtures table, and
- *   - every completed match involving us or an upcoming opponent, game by game, for scouting.
+ *   - every completed match involving us or an upcoming opponent, game by game, for scouting, and
+ *   - our players' official season records from the league's Players page.
  * Matches already imported are never fetched again, so routine syncs make only a few requests.
  */
 import { getMeta, setMeta } from "./db.ts";
@@ -50,6 +51,11 @@ type MatchupDetail = {
   };
 };
 
+type CplPlayer = { firstName: string; lastName: string; gender: string; teamName: string; wins: number; losses: number };
+
+/** A player's official CPL season record, as shown on crossclubpickleball.com/leagues/players. */
+export type CplPlayerRecord = { name: string; gender: Gender | null; wins: number; losses: number };
+
 type Region = { location: string; divisions: { divisionId: string; divisionName: string }[] };
 
 export type SyncResult = { division: string; fixtures: number; imported: number };
@@ -72,6 +78,15 @@ export async function syncFromCpl(team: string, divisionId = DEFAULT_DIVISION_ID
       location: m.address,
     }));
   await replaceUpcomingFixtures(team, today, upcoming);
+
+  const roster = (await get<CplPlayer[]>(`/divisions/${divisionId}/players`)).filter((p) => p.teamName === team);
+  const records: CplPlayerRecord[] = roster.map((p) => ({
+    name: `${p.firstName} ${p.lastName}`.trim(),
+    gender: toGender(p.gender),
+    wins: p.wins,
+    losses: p.losses,
+  }));
+  await setMeta(playerRecordsKey(team), JSON.stringify(records));
 
   const scouted = new Set([team, ...upcoming.map((f) => f.opponent)]);
   const known = await importedCplIds();
@@ -97,6 +112,14 @@ export async function syncFromCpl(team: string, divisionId = DEFAULT_DIVISION_ID
 }
 
 export const lastSyncedAt = () => getMeta("cpl_synced_at");
+
+/** Our players' CPL season records from the last sync (empty until the first sync). */
+export async function cplPlayerRecords(team: string): Promise<CplPlayerRecord[]> {
+  const saved = await getMeta(playerRecordsKey(team));
+  return saved ? (JSON.parse(saved) as CplPlayerRecord[]) : [];
+}
+
+const playerRecordsKey = (team: string) => `cpl_player_records:${team}`;
 
 function toMatch(m: Matchup, detail: MatchupDetail): MatchInput {
   const teamName = (teamId: string) => (teamId === detail.matchup.homeTeamId ? m.homeName : m.awayName);
