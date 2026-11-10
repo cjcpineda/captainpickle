@@ -29,6 +29,7 @@ export type ScoutingReport = {
 };
 
 const MIN_GAMES_TO_RANK = 2;
+const STRONGEST_COUNT = 4;
 
 /** Each game twice, once from each side, so every row reads "this pair, for/against". */
 const SIDES = `
@@ -69,10 +70,16 @@ export async function scoutingReport(teamId: number): Promise<ScoutingReport> {
     teamId,
   ))!;
 
+  // Players with enough games to trust their win rate come first; anyone else who has played fills any open spots.
   const strongest = roster
-    .filter((p) => p.games >= MIN_GAMES_TO_RANK)
-    .sort((a, b) => b.wins / b.games - a.wins / a.games || b.pointDiff / b.games - a.pointDiff / a.games)
-    .slice(0, 3);
+    .filter((p) => p.games > 0)
+    .sort(
+      (a, b) =>
+        Number(b.games >= MIN_GAMES_TO_RANK) - Number(a.games >= MIN_GAMES_TO_RANK) ||
+        b.wins / b.games - a.wins / a.games ||
+        b.pointDiff / b.games - a.pointDiff / a.games,
+    )
+    .slice(0, STRONGEST_COUNT);
 
   return {
     team,

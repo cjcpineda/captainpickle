@@ -1,6 +1,7 @@
 import { requireCaptain } from "@/lib/auth.ts";
 import { monthDay, weekday } from "@/lib/dates.ts";
 import { practiceSessions } from "@/lib/repo.ts";
+import { cplPlayerRecords, type CplPlayerRecord } from "@/lib/cpl.ts";
 import { pairRecords, type PairRecord, type WinLoss } from "@/lib/scouting.ts";
 import { PracticeUpload } from "@/components/PracticeUpload.tsx";
 import { deletePractice } from "./actions.ts";
@@ -10,8 +11,13 @@ const MIN_GAMES = 2;
 
 export default async function PracticePage() {
   const captain = await requireCaptain();
-  const [sessions, records] = await Promise.all([practiceSessions(captain.teamId), pairRecords(captain.teamId)]);
+  const [sessions, records, playerStats] = await Promise.all([
+    practiceSessions(captain.teamId),
+    pairRecords(captain.teamId),
+    cplPlayerRecords(captain.teamName),
+  ]);
   const pairs = bestPairs(records);
+  const players = rankPlayers(playerStats);
 
   return (
     <>
@@ -68,6 +74,41 @@ export default async function PracticePage() {
               </table>
             )}
           </section>
+
+          <section className="card">
+            <div className="card-head">
+              <h2>Player records</h2>
+              <span className="sub">CPL league games, best first</span>
+            </div>
+            {players.length === 0 ? (
+              <p className="empty">No records yet. Sync from CPL on the Schedule page to load them.</p>
+            ) : (
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Player</th>
+                    <th>W–L</th>
+                    <th>Win %</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {players.map((p, i) => (
+                    <tr key={p.name}>
+                      <td className="num">{i + 1}</td>
+                      <td>
+                        <b>{p.name}</b> {p.gender && <span className="sub">{p.gender}</span>}
+                      </td>
+                      <td>
+                        {p.wins}–{p.losses}
+                      </td>
+                      <td className="num">{winPct(p)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </section>
         </div>
 
         <aside className="card">
@@ -116,6 +157,16 @@ function bestPairs(pairs: PairRecord[]): PairRecord[] {
     .filter((p) => total(p).games >= MIN_GAMES)
     .sort((x, y) => smoothedWinRate(total(y)) - smoothedWinRate(total(x)))
     .slice(0, 15);
+}
+
+/** Highest win percentage first; ties go to whoever has more wins. Players with no games go last. */
+function rankPlayers(players: CplPlayerRecord[]): CplPlayerRecord[] {
+  const rate = (p: CplPlayerRecord) => (p.wins + p.losses === 0 ? -1 : p.wins / (p.wins + p.losses));
+  return [...players].sort((a, b) => rate(b) - rate(a) || b.wins - a.wins || a.name.localeCompare(b.name));
+}
+
+function winPct({ wins, losses }: CplPlayerRecord): string {
+  return wins + losses === 0 ? "–" : `${Math.round((100 * wins) / (wins + losses))}%`;
 }
 
 /** Win rate pulled toward 50% for small samples, so 2–0 doesn't outrank 12–2. */

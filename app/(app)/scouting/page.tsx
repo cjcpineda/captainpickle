@@ -50,27 +50,29 @@ export default async function ScoutingPage({ searchParams }: { searchParams: Pro
 function Report({ report, played }: { report: ScoutingReport; played: Result[] }) {
   return (
     <div className="scouting">
-      <section className="card">
-        <div className="card-head">
-          <h2>Strongest players</h2>
-          <span className="sub">Win rate, 2+ games</span>
-        </div>
-        {report.strongest.length === 0 ? (
-          <p className="empty">Not enough games yet.</p>
-        ) : (
-          <ol className="rows">
-            {report.strongest.map((p, i) => (
-              <li key={p.name} className="row stat-row">
-                <span className="rank">{i + 1}</span>
-                <PlayerName player={p} />
-                <Record wins={p.wins} games={p.games} pointDiff={p.pointDiff} />
-              </li>
-            ))}
-          </ol>
-        )}
-      </section>
+      <div className="stack">
+        <section className="card">
+          <div className="card-head">
+            <h2>Strongest players</h2>
+            <span className="sub">By win rate</span>
+          </div>
+          {report.strongest.length === 0 ? (
+            <p className="empty">Not enough games yet.</p>
+          ) : (
+            <ol className="rows">
+              {report.strongest.map((p, i) => (
+                <li key={p.name} className="row stat-row">
+                  <span className="rank">{i + 1}</span>
+                  <PlayerName player={p} />
+                  <Record wins={p.wins} games={p.games} pointDiff={p.pointDiff} />
+                </li>
+              ))}
+            </ol>
+          )}
+        </section>
 
-      <TeamRecord played={played} />
+        <TeamRecord played={played} />
+      </div>
 
       <section className="card">
         <div className="card-head">
