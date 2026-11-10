@@ -358,6 +358,7 @@ input:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 
 .scouting { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; align-items: start; }
 
 .stat-row { grid-template-columns: 40px 1fr auto; }
+.record-row { grid-template-columns: 1fr auto; }
 
 .rank { font-family: var(--display); font-weight: 700; font-size: 18px; color: var(--muted); }
 

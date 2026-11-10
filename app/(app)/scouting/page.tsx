@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { requireCaptain } from "@/lib/auth.ts";
 import { leagueToday } from "@/lib/deadline.ts";
-import { longDate } from "@/lib/dates.ts";
-import { upcomingFixtures } from "@/lib/repo.ts";
+import { longDate, monthDay } from "@/lib/dates.ts";
+import { results, upcomingFixtures, type Result } from "@/lib/repo.ts";
 import { scoutingReport, type Format, type ScoutingReport, type ScoutedPair, type ScoutedPlayer } from "@/lib/scouting.ts";
 
 const FORMAT_LABEL: Record<Format, string> = { mixed: "Mixed", womens: "Women's", mens: "Men's" };
@@ -17,7 +17,7 @@ export default async function ScoutingPage({ searchParams }: { searchParams: Pro
     return <p className="empty card">No upcoming opponent to scout.</p>;
   }
 
-  const report = await scoutingReport(opponentId);
+  const [report, played] = await Promise.all([scoutingReport(opponentId), results(opponentId)]);
   const ask = `Give me recommended counter-pairings for all eight rounds against ${report.team}, based on their likely pairs and strongest players.`;
 
   return (
@@ -41,13 +41,13 @@ export default async function ScoutingPage({ searchParams }: { searchParams: Pro
           fill in once their CPL match history is synced.
         </p>
       ) : (
-        <Report report={report} />
+        <Report report={report} played={played} />
       )}
     </>
   );
 }
 
-function Report({ report }: { report: ScoutingReport }) {
+function Report({ report, played }: { report: ScoutingReport; played: Result[] }) {
   return (
     <div className="scouting">
       <section className="card">
@@ -69,6 +69,8 @@ function Report({ report }: { report: ScoutingReport }) {
           </ol>
         )}
       </section>
+
+      <TeamRecord played={played} />
 
       <section className="card">
         <div className="card-head">
@@ -105,6 +107,43 @@ function Report({ report }: { report: ScoutingReport }) {
         )}
       </section>
     </div>
+  );
+}
+
+function TeamRecord({ played }: { played: Result[] }) {
+  const won = played.filter((r) => r.gamesWon > r.gamesLost).length;
+  const lost = played.filter((r) => r.gamesWon < r.gamesLost).length;
+  const tied = played.length - won - lost;
+  return (
+    <section className="card">
+      <div className="card-head">
+        <h2>Record</h2>
+        <span className="sub">
+          {won}–{lost}
+          {tied > 0 && `–${tied}`} in league matches
+        </span>
+      </div>
+      {played.length === 0 ? (
+        <p className="empty">No league results yet.</p>
+      ) : (
+        <ul className="rows">
+          {played.map((r) => {
+            const outcome = r.gamesWon > r.gamesLost ? "w" : r.gamesWon < r.gamesLost ? "l" : "t";
+            return (
+              <li key={r.matchId} className="row record-row">
+                <span>
+                  {r.isHome ? "vs" : "@"} {r.opponent} <span className="sub">{monthDay(r.playedOn)}</span>
+                </span>
+                <span className="record">
+                  <span className={`badge ${outcome}`}>{outcome.toUpperCase()}</span>
+                  {r.gamesWon}–{r.gamesLost}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
   );
 }
 
