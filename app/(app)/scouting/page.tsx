@@ -54,7 +54,7 @@ function Report({ report, played }: { report: ScoutingReport; played: Result[] }
         <section className="card">
           <div className="card-head">
             <h2>Strongest players</h2>
-            <span className="sub">Win rate, 2+ games</span>
+            <span className="sub">By win rate</span>
           </div>
           {report.strongest.length === 0 ? (
             <p className="empty">Not enough games yet.</p>
