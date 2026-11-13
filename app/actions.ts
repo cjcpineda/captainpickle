@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireCaptain, signIn, signOut } from "@/lib/auth.ts";
-import { DEFAULT_DIVISION_ID, syncFromCpl } from "@/lib/cpl.ts";
+import { syncFromCpl } from "@/lib/cpl.ts";
 
 export async function login(_: string | null, form: FormData): Promise<string | null> {
   const ok = await signIn(String(form.get("email") ?? ""), String(form.get("password") ?? ""));
@@ -20,7 +20,7 @@ export async function logout() {
 export async function syncNow(): Promise<string | null> {
   const captain = await requireCaptain();
   try {
-    await syncFromCpl(captain.teamName, process.env.CPL_DIVISION_ID || DEFAULT_DIVISION_ID);
+    await syncFromCpl({ id: captain.teamId, name: captain.teamName, divisionId: captain.divisionId, division: captain.division });
   } catch (err) {
     console.error("CPL sync failed:", err);
     return "Couldn't reach CPL. Try again in a minute.";

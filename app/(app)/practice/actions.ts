@@ -57,7 +57,7 @@ export async function savePracticeGames(input: z.infer<typeof SaveInput>): Promi
   const parsed = SaveInput.safeParse(input);
   if (!parsed.success) return { error: "Those games didn't look right. Try uploading again." };
   const { fileName, fallbackDate, games } = parsed.data;
-  const sessions = await savePractice(captain.teamName, games, fallbackDate, fileName);
+  const sessions = await savePractice({ name: captain.teamName, divisionId: captain.divisionId }, games, fallbackDate, fileName);
   revalidatePath("/practice");
   return { sessions };
 }

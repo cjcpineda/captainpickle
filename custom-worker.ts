@@ -12,6 +12,6 @@ export default {
 
   async scheduled(_event, env, ctx) {
     useDatabase(env.DB);
-    ctx.waitUntil(syncAllTeams(env.CPL_DIVISION_ID));
+    ctx.waitUntil(syncAllTeams());
   },
 } satisfies ExportedHandler<CloudflareEnv>;

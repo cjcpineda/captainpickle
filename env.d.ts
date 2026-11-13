@@ -3,5 +3,4 @@
 interface CloudflareEnv {
   AI_MODEL?: string;
   AI_VISION_MODEL?: string;
-  CPL_DIVISION_ID?: string;
 }

@@ -15,16 +15,15 @@ import {
   importedCplIds,
   insertMatch,
   replaceUpcomingFixtures,
+  upsertTeam,
   type FixtureInput,
   type MatchInput,
+  type Team,
 } from "./repo.ts";
 import type { Gender } from "./rules.ts";
 
 const API = "https://cplsecureapiproxy.azurewebsites.net/api/CPLSecureApiProxy/v0/api";
 const PAUSE_MS = 300; // between match downloads, to go easy on the league's server
-
-/** NJ / PA 4.0. Override with CPL_DIVISION_ID for another division. */
-export const DEFAULT_DIVISION_ID = "a1413f3d-5f4b-4ad4-b5cf-c21c7c8b7d66";
 
 type Matchup = {
   matchupId: string;
@@ -58,10 +57,18 @@ export type CplPlayerRecord = { name: string; gender: Gender | null; wins: numbe
 
 type Region = { location: string; divisions: { divisionId: string; divisionName: string }[] };
 
+/** A CPL division, named the way the league site shows it ("NJ / PA 3.0"). */
+export type Division = { id: string; name: string };
+
 export type SyncResult = { division: string; fixtures: number; imported: number };
 
-export async function syncFromCpl(team: string, divisionId = DEFAULT_DIVISION_ID): Promise<SyncResult> {
-  const division = await divisionName(divisionId);
+/** Syncs one team from its own CPL division: schedule, players' records, and match sheets. */
+export async function syncFromCpl(ourTeam: Team): Promise<SyncResult> {
+  const { divisionId, name: team } = ourTeam;
+  const division = (await divisions()).find((d) => d.id === divisionId)?.name;
+  if (!division) throw new Error(`CPL division ${divisionId} not found.`);
+  if (division !== ourTeam.division) await upsertTeam(team, divisionId, division);
+
   const matchups = await get<Matchup[]>(`/divisions/${divisionId}/matchups`);
   const ours = matchups.filter((m) => m.homeName === team || m.awayName === team);
   const today = leagueToday();
@@ -69,7 +76,6 @@ export async function syncFromCpl(team: string, divisionId = DEFAULT_DIVISION_ID
   const upcoming: FixtureInput[] = ours
     .filter((m) => !m.endResult && m.scheduledTime.slice(0, 10) >= today)
     .map((m) => ({
-      team,
       opponent: m.homeName === team ? m.awayName : m.homeName,
       playOn: m.scheduledTime.slice(0, 10),
       startTime: m.scheduledTime.slice(11, 16),
@@ -77,7 +83,7 @@ export async function syncFromCpl(team: string, divisionId = DEFAULT_DIVISION_ID
       division,
       location: m.address,
     }));
-  await replaceUpcomingFixtures(team, today, upcoming);
+  await replaceUpcomingFixtures({ ...ourTeam, division }, today, upcoming);
 
   const roster = (await get<CplPlayer[]>(`/divisions/${divisionId}/players`)).filter((p) => p.teamName === team);
   const records: CplPlayerRecord[] = roster.map((p) => ({
@@ -86,7 +92,7 @@ export async function syncFromCpl(team: string, divisionId = DEFAULT_DIVISION_ID
     wins: p.wins,
     losses: p.losses,
   }));
-  await setMeta(playerRecordsKey(team), JSON.stringify(records));
+  await setMeta(playerRecordsKey(ourTeam.id), JSON.stringify(records));
 
   const scouted = new Set([team, ...upcoming.map((f) => f.opponent)]);
   const known = await importedCplIds();
@@ -96,8 +102,8 @@ export async function syncFromCpl(team: string, divisionId = DEFAULT_DIVISION_ID
 
   for (const m of toImport) {
     const detail = await get<MatchupDetail>(`/divisions/${divisionId}/matchups/${m.matchupId}`);
-    const match = toMatch(m, detail);
-    await deleteManualCopies(match.home, match.away, match.playedOn);
+    const match = toMatch(m, detail, divisionId);
+    await deleteManualCopies(match.home, match.away, match.playedOn, divisionId);
     try {
       await insertMatch(match);
     } catch (err) {
@@ -114,14 +120,14 @@ export async function syncFromCpl(team: string, divisionId = DEFAULT_DIVISION_ID
 export const lastSyncedAt = () => getMeta("cpl_synced_at");
 
 /** Our players' CPL season records from the last sync (empty until the first sync). */
-export async function cplPlayerRecords(team: string): Promise<CplPlayerRecord[]> {
-  const saved = await getMeta(playerRecordsKey(team));
+export async function cplPlayerRecords(teamId: number): Promise<CplPlayerRecord[]> {
+  const saved = await getMeta(playerRecordsKey(teamId));
   return saved ? (JSON.parse(saved) as CplPlayerRecord[]) : [];
 }
 
-const playerRecordsKey = (team: string) => `cpl_player_records:${team}`;
+const playerRecordsKey = (teamId: number) => `cpl_player_records:${teamId}`;
 
-function toMatch(m: Matchup, detail: MatchupDetail): MatchInput {
+function toMatch(m: Matchup, detail: MatchupDetail, divisionId: string): MatchInput {
   const teamName = (teamId: string) => (teamId === detail.matchup.homeTeamId ? m.homeName : m.awayName);
   const players = new Map(
     detail.matchupPlayerStats.map((p) => [
@@ -136,6 +142,7 @@ function toMatch(m: Matchup, detail: MatchupDetail): MatchInput {
 
   return {
     kind: "league",
+    divisionId,
     playedOn: m.scheduledTime.slice(0, 10),
     home: m.homeName,
     away: m.awayName,
@@ -155,13 +162,15 @@ function toMatch(m: Matchup, detail: MatchupDetail): MatchInput {
   };
 }
 
-async function divisionName(divisionId: string): Promise<string> {
+/** Every CPL division, in every region. */
+export async function divisions(): Promise<Division[]> {
   const regions = await get<Region[]>("/regions");
-  for (const region of regions) {
-    const division = region.divisions.find((d) => d.divisionId === divisionId);
-    if (division) return `${region.location} ${division.divisionName}`;
-  }
-  throw new Error(`CPL division ${divisionId} not found.`);
+  return regions.flatMap((r) => r.divisions.map((d) => ({ id: d.divisionId, name: `${r.location} ${d.divisionName}` })));
+}
+
+/** Names of the teams playing in a division. */
+export async function divisionTeams(divisionId: string): Promise<string[]> {
+  return (await get<{ teamName: string }[]>(`/divisions/${divisionId}/teams`)).map((t) => t.teamName);
 }
 
 function toGender(value: string): Gender | null {

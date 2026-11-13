@@ -28,8 +28,10 @@ npm run db:migrate
 Create a captain login:
 
 ```bash
-npm run captain -- you@example.com "Your Name" "Your Team Name" yourpassword
+npm run captain -- you@example.com "Your Name" "Your Team Name" yourpassword --division "NJ / PA 4.0"
 ```
+
+Use your team's division as crossclubpickleball.com names it (`"NJ / PA 3.0"`, `"NJ / PA 3.5 (50+)"`, …). Each captain sees only their own division's schedule, players and results.
 
 Start the app:
 
@@ -55,7 +57,7 @@ npx wrangler login
 npx wrangler d1 create captainpickle      # paste the printed database_id into wrangler.jsonc
 npm run db:migrate:remote
 npm run deploy
-npm run captain -- you@example.com "Your Name" "Your Team Name" yourpassword --remote
+npm run captain -- you@example.com "Your Name" "Your Team Name" yourpassword --division "NJ / PA 4.0" --remote
 ```
 
 After changing bindings in `wrangler.jsonc`, run `npm run cf-typegen` to refresh `cloudflare-env.d.ts`.

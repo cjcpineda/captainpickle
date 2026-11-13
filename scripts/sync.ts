@@ -9,5 +9,5 @@ import { syncAllTeams } from "../lib/cpl-schedule.ts";
 
 const { env, dispose } = await getPlatformProxy<CloudflareEnv>();
 useDatabase(env.DB);
-await syncAllTeams(process.env.CPL_DIVISION_ID);
+await syncAllTeams();
 await dispose();

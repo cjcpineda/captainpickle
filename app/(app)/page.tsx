@@ -19,7 +19,7 @@ export default async function SchedulePage() {
     <>
       <div className="page-head">
         <div>
-          <div className="kicker">Cross Club Pickleball{next?.division && ` · ${next.division}`}</div>
+          <div className="kicker">Cross Club Pickleball{captain.division && ` · ${captain.division}`}</div>
           <h1>{captain.teamName}</h1>
         </div>
         <div className="sync">
