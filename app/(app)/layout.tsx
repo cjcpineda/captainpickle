@@ -14,7 +14,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           </Link>
           <NavLinks />
           <form action={logout} className="who">
-            <span>{captain.teamName}</span>
+            <span>
+              {captain.teamName}
+              {captain.division && <small className="division"> · {captain.division}</small>}
+            </span>
             <button type="submit">Sign out</button>
           </form>
         </div>

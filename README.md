@@ -20,7 +20,7 @@ cd captainpickle
 npm install
 npx wrangler login                # Workers AI runs on Cloudflare, even in local dev
 npm run db:migrate                # creates the local D1 database
-npm run captain -- you@example.com "Your Name" "Your Team Name" <password>
+npm run captain -- you@example.com "Your Name" "Your Team Name" <password> --division "NJ / PA 4.0"
 npm run sync                      # pulls your schedule and results from CPL
 npm run dev                       # http://localhost:3000
 ```
@@ -40,7 +40,7 @@ Your computer and Cloudflare have **separate databases**. `npm run dev` and `npm
 npx wrangler login
 npm run db:migrate:remote
 npm run deploy
-npm run captain -- you@example.com "Your Name" "Your Team Name" <password> --remote
+npm run captain -- you@example.com "Your Name" "Your Team Name" <password> --division "NJ / PA 4.0" --remote
 ```
 
 First deploy on a new account: run `npx wrangler d1 create captainpickle` and paste the printed `database_id` into `wrangler.jsonc`. After changing bindings, run `npm run cf-typegen`.
@@ -87,7 +87,17 @@ crossclubpickleball.com is a single-page app backed by a public, read-only JSON 
 
 A match is downloaded once and never re-fetched, so routine syncs make only a couple of requests. Forfeited games (no players listed) are skipped.
 
-The division defaults to NJ / PA 4.0. Set `CPL_DIVISION_ID` for another division, or `CPL_SYNC=off` to turn off the automatic sync.
+### Divisions
+
+Every team belongs to one CPL division, and each captain sees only their own division: their schedule, results, roster, player records, scouting reports and the AI Strategist's lookups all come from it. Clubs often field a team with the same name in several divisions (Pickleball Kingdom Tinton Falls plays in 3.0, 3.5 and 4.0), so a team is a name *within* a division, and those are separate teams in the database.
+
+Pick the division when you add the captain, using the name the league site shows:
+
+```bash
+npm run captain -- mike@example.com "Mike Alfaro" "Pickleball Kingdom Tinton Falls" <password> --division "NJ / PA 3.0"
+```
+
+Leave out `--division` and the script looks the team up on CPL; if the name plays in more than one division, it lists them for you to choose. Running the command again for an existing email moves that captain to the new team and division. Then press **Sync now** (or `npm run sync`) to pull that division's data.
 
 ## Practice data
 

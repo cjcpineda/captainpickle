@@ -33,7 +33,7 @@ export async function runStrategist(captain: Captain, chatId: number | null, tex
   messages.push({ role: "user", content: text });
   await saveMessages(id, messages);
 
-  const context = `Captain: ${captain.name}. Team: ${captain.teamName}. Today: ${new Date().toDateString()}.`;
+  const context = `Captain: ${captain.name}. Team: ${captain.teamName}. Division: ${captain.division ?? "unknown"} (every team, player and result you can look up is from this division). Today: ${new Date().toDateString()}.`;
   const system: ChatMessage = { role: "system", content: `${SYSTEM}\n\n${context}` };
 
   for (let step = 0; ; step++) {

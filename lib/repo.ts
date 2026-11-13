@@ -1,7 +1,8 @@
 import { all, batch, get, run, stmt } from "./db.ts";
 import type { Gender } from "./rules.ts";
 
-export type Team = { id: number; name: string };
+/** A team in one CPL division. The same club name can appear in several divisions as different teams. */
+export type Team = { id: number; name: string; divisionId: string; division: string | null };
 
 export type Player = { id: number; name: string; gender: Gender | null; teamId: number; teamName: string };
 
@@ -16,7 +17,7 @@ export type Fixture = {
   location: string | null;
 };
 
-export type FixtureInput = Omit<Fixture, "id" | "opponentId"> & { team: string };
+export type FixtureInput = Omit<Fixture, "id" | "opponentId">;
 
 export type Result = {
   matchId: number;
@@ -37,6 +38,8 @@ export type GameDetail = {
 
 export type MatchInput = {
   kind: "league" | "practice";
+  /** The CPL division both teams play in; team names are looked up within it. */
+  divisionId: string;
   playedOn: string;
   home: string;
   away: string;
@@ -46,12 +49,20 @@ export type MatchInput = {
   games: { round: number | null; a: [string, string]; b: [string, string]; scoreA: number; scoreB: number }[];
 };
 
-export async function upsertTeam(name: string): Promise<number> {
+export async function upsertTeam(name: string, divisionId: string, division: string | null = null): Promise<number> {
   const row = await get<{ id: number }>(
-    "INSERT INTO teams (name) VALUES (?) ON CONFLICT (name) DO UPDATE SET name = teams.name RETURNING id",
+    `INSERT INTO teams (name, division_id, division) VALUES (?, ?, ?)
+     ON CONFLICT (name, division_id) DO UPDATE SET division = coalesce(excluded.division, teams.division)
+     RETURNING id`,
     name.trim(),
+    divisionId,
+    division,
   );
   return row!.id;
+}
+
+export async function getTeam(id: number): Promise<Team | undefined> {
+  return get<Team>("SELECT id, name, division_id AS divisionId, division FROM teams WHERE id = ?", id);
 }
 
 export async function upsertPlayer(name: string, teamId: number, gender: Gender | null): Promise<number> {
@@ -67,12 +78,13 @@ export async function upsertPlayer(name: string, teamId: number, gender: Gender 
 }
 
 export async function insertMatch(input: MatchInput): Promise<number> {
-  const homeId = await upsertTeam(input.home);
-  const awayId = await upsertTeam(input.away);
+  const team = (name: string) => upsertTeam(name, input.divisionId);
+  const homeId = await team(input.home);
+  const awayId = await team(input.away);
 
   // Resolve every player to an id first; names not in the player list default to the home team.
   const ids = new Map<string, number>();
-  for (const p of input.players) ids.set(p.name, await upsertPlayer(p.name, await upsertTeam(p.team), p.gender));
+  for (const p of input.players) ids.set(p.name, await upsertPlayer(p.name, await team(p.team), p.gender));
   for (const name of input.games.flatMap((g) => [...g.a, ...g.b])) {
     if (!ids.has(name)) ids.set(name, await upsertPlayer(name, homeId, null));
   }
@@ -95,14 +107,18 @@ export async function insertMatch(input: MatchInput): Promise<number> {
   return (inserted.results[0] as { id: number }).id;
 }
 
-export function listTeams(): Promise<Team[]> {
-  return all<Team>("SELECT id, name FROM teams ORDER BY name");
+/** Every team in one division. */
+export function listTeams(divisionId: string): Promise<Team[]> {
+  return all<Team>(
+    "SELECT id, name, division_id AS divisionId, division FROM teams WHERE division_id = ? ORDER BY name",
+    divisionId,
+  );
 }
 
-/** Case-insensitive team lookup that tolerates partial names ("bounce" → "Bounce Philly"). */
-export async function findTeam(query: string): Promise<Team | undefined> {
+/** Case-insensitive team lookup within a division that tolerates partial names ("bounce" → "Bounce Philly"). */
+export async function findTeam(query: string, divisionId: string): Promise<Team | undefined> {
   const q = query.trim().toLowerCase();
-  const teams = await listTeams();
+  const teams = await listTeams(divisionId);
   return teams.find((t) => t.name.toLowerCase() === q) ?? teams.find((t) => t.name.toLowerCase().includes(q));
 }
 
@@ -135,25 +151,25 @@ export async function importedCplIds(): Promise<Set<string>> {
  * Drops a hand-entered copy of a match CPL now provides (same two teams, within two days),
  * so it isn't counted twice.
  */
-export async function deleteManualCopies(home: string, away: string, playedOn: string) {
+export async function deleteManualCopies(home: string, away: string, playedOn: string, divisionId: string) {
   await run(
     `DELETE FROM matches WHERE cpl_id IS NULL AND kind = 'league'
-     AND abs(julianday(played_on) - julianday(?)) <= 2
-     AND home_id IN (SELECT id FROM teams WHERE name IN (?, ?))
-     AND away_id IN (SELECT id FROM teams WHERE name IN (?, ?))`,
-    playedOn, home, away, home, away,
+     AND abs(julianday(played_on) - julianday(?1)) <= 2
+     AND home_id IN (SELECT id FROM teams WHERE name IN (?2, ?3) AND division_id = ?4)
+     AND away_id IN (SELECT id FROM teams WHERE name IN (?2, ?3) AND division_id = ?4)`,
+    playedOn, home, away, divisionId,
   );
 }
 
 /** Replaces a team's upcoming schedule with the given fixtures, all at once. */
-export async function replaceUpcomingFixtures(team: string, fromDate: string, fixtures: FixtureInput[]) {
-  const teamIds = new Map<string, number>();
-  for (const name of [team, ...fixtures.flatMap((f) => [f.team, f.opponent])]) {
-    if (!teamIds.has(name)) teamIds.set(name, await upsertTeam(name));
+export async function replaceUpcomingFixtures(team: Team, fromDate: string, fixtures: FixtureInput[]) {
+  const opponentIds = new Map<string, number>();
+  for (const { opponent } of fixtures) {
+    if (!opponentIds.has(opponent)) opponentIds.set(opponent, await upsertTeam(opponent, team.divisionId, team.division));
   }
 
   await batch([
-    stmt("DELETE FROM fixtures WHERE team_id = ? AND play_on >= ?", teamIds.get(team)!, fromDate),
+    stmt("DELETE FROM fixtures WHERE team_id = ? AND play_on >= ?", team.id, fromDate),
     ...fixtures.map((f) =>
       stmt(
         `INSERT INTO fixtures (team_id, opponent_id, play_on, start_time, is_home, division, location)
@@ -161,7 +177,7 @@ export async function replaceUpcomingFixtures(team: string, fromDate: string, fi
          ON CONFLICT (team_id, opponent_id, play_on) DO UPDATE SET
            start_time = excluded.start_time, is_home = excluded.is_home,
            division = excluded.division, location = excluded.location`,
-        teamIds.get(f.team)!, teamIds.get(f.opponent)!, f.playOn, f.startTime, f.isHome ? 1 : 0, f.division, f.location,
+        team.id, opponentIds.get(f.opponent)!, f.playOn, f.startTime, f.isHome ? 1 : 0, f.division, f.location,
       ),
     ),
   ]);
@@ -251,11 +267,13 @@ export async function playerGames(playerId: number): Promise<PlayerGame[]> {
   });
 }
 
-export async function findPlayer(query: string): Promise<Player[]> {
+/** Players in one division whose name matches: exact, then a whole first or last name, then any part. */
+export async function findPlayer(query: string, divisionId: string): Promise<Player[]> {
   const q = query.trim().toLowerCase();
   const players = await all<Player>(
     `SELECT p.id, p.name, p.gender, p.team_id AS teamId, t.name AS teamName
-       FROM players p JOIN teams t ON t.id = p.team_id ORDER BY p.name`,
+       FROM players p JOIN teams t ON t.id = p.team_id WHERE t.division_id = ? ORDER BY p.name`,
+    divisionId,
   );
   return [
     players.filter((p) => p.name.toLowerCase() === q),

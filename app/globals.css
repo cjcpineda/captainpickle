@@ -86,6 +86,7 @@ h1, h2, h3 {
 .nav a:hover, .nav a[aria-current="page"] { color: #fff; background: #ffffff14; }
 
 .who { font-size: 13px; color: #aab1bc; display: flex; align-items: center; gap: 12px; }
+.who .division { font-size: inherit; color: #7f8794; }
 
 .who button {
   background: none;

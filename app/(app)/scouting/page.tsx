@@ -2,7 +2,7 @@ import Link from "next/link";
 import { requireCaptain } from "@/lib/auth.ts";
 import { leagueToday } from "@/lib/deadline.ts";
 import { longDate, monthDay } from "@/lib/dates.ts";
-import { results, upcomingFixtures, type Result } from "@/lib/repo.ts";
+import { getTeam, results, upcomingFixtures, type Result } from "@/lib/repo.ts";
 import { scoutingReport, type Format, type ScoutingReport, type ScoutedPair, type ScoutedPlayer } from "@/lib/scouting.ts";
 
 const FORMAT_LABEL: Record<Format, string> = { mixed: "Mixed", womens: "Women's", mens: "Men's" };
@@ -11,7 +11,9 @@ export default async function ScoutingPage({ searchParams }: { searchParams: Pro
   const [captain, { team }] = await Promise.all([requireCaptain(), searchParams]);
   const fixtures = await upcomingFixtures(captain.teamId, leagueToday());
   const fixture = team ? fixtures.find((f) => f.opponentId === Number(team)) : fixtures[0];
-  const opponentId = fixture?.opponentId ?? (team ? Number(team) : null);
+  // Any team in the captain's own division can be scouted; teams in other divisions can't.
+  const asked = !fixture && team ? await getTeam(Number(team)) : undefined;
+  const opponentId = fixture?.opponentId ?? (asked?.divisionId === captain.divisionId ? asked.id : null);
 
   if (!opponentId) {
     return <p className="empty card">No upcoming opponent to scout.</p>;

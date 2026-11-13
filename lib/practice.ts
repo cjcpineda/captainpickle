@@ -126,17 +126,18 @@ export function matchToRoster(name: string, roster: string[]): { name: string; k
 }
 
 /** Saves practice games as one practice session per date. */
-export async function savePractice(team: string, games: PracticeGame[], fallbackDate: string, fileName: string): Promise<number> {
+export async function savePractice(team: { name: string; divisionId: string }, games: PracticeGame[], fallbackDate: string, fileName: string): Promise<number> {
   const byDate = Map.groupBy(games, (g) => g.playedOn ?? fallbackDate);
   for (const [playedOn, sessionGames] of byDate) {
     const names = new Set(sessionGames.flatMap((g) => [...g.a, ...g.b]));
     await insertMatch({
       kind: "practice",
+      divisionId: team.divisionId,
       playedOn,
-      home: team,
-      away: team,
+      home: team.name,
+      away: team.name,
       source: `Practice upload: ${fileName}`,
-      players: [...names].map((name) => ({ name, team, gender: null })),
+      players: [...names].map((name) => ({ name, team: team.name, gender: null })),
       games: sessionGames.map((g) => ({ round: null, a: g.a, b: g.b, scoreA: g.scoreA, scoreB: g.scoreB })),
     });
   }

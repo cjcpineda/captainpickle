@@ -42,12 +42,12 @@ const TOOLS = {
   }),
 
   get_roster: tool({
-    description: "Players on a team with gender (F/M). Defaults to our team. Also lists every team in the league.",
+    description: "Players on a team in our division with gender (F/M). Defaults to our team. Also lists every team in our division.",
     status: "Pulling the roster",
     input: z.object({ team: z.string().optional().describe("Team name; omit for our team") }),
     run: async ({ team }, captain) => {
-      const found = team ? await findTeam(team) : { id: captain.teamId, name: captain.teamName };
-      if (!found) return { error: `No team matching "${team}".`, teams: (await listTeams()).map((t) => t.name) };
+      const found = team ? await findTeam(team, captain.divisionId) : { id: captain.teamId, name: captain.teamName };
+      if (!found) return { error: `No team matching "${team}".`, teams: (await listTeams(captain.divisionId)).map((t) => t.name) };
       const players = await teamPlayers(found.id);
       return { team: found.name, players: players.map(({ name, gender }) => ({ name, gender })) };
     },
@@ -69,13 +69,13 @@ const TOOLS = {
 
   get_scouting_report: tool({
     description:
-      "Scouting report on a team: roster with each player's record and point differential, every pair they've used " +
+      "Scouting report on a team in our division: roster with each player's record and point differential, every pair they've used " +
       "(most frequent first, with format and record), and their strongest players by win rate.",
     status: "Scouting the opponent",
     input: z.object({ team: z.string() }),
-    run: async ({ team }) => {
-      const found = await findTeam(team);
-      if (!found) return { error: `No team matching "${team}".`, teams: (await listTeams()).map((t) => t.name) };
+    run: async ({ team }, captain) => {
+      const found = await findTeam(team, captain.divisionId);
+      if (!found) return { error: `No team matching "${team}".`, teams: (await listTeams(captain.divisionId)).map((t) => t.name) };
       return scoutingReport(found.id);
     },
   }),
@@ -93,8 +93,8 @@ const TOOLS = {
     description: "Every game on file for one player (league and practice): date, partner, opponents, score, result.",
     status: "Looking up player history",
     input: z.object({ player: z.string().describe("Full or partial name") }),
-    run: async ({ player }) => {
-      const matches = await findPlayer(player);
+    run: async ({ player }, captain) => {
+      const matches = await findPlayer(player, captain.divisionId);
       if (matches.length !== 1) {
         return { error: matches.length ? `"${player}" is ambiguous` : `No player matching "${player}"`, candidates: matches.map((p) => p.name) };
       }

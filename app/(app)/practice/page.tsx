@@ -14,7 +14,7 @@ export default async function PracticePage() {
   const [sessions, records, playerStats] = await Promise.all([
     practiceSessions(captain.teamId),
     pairRecords(captain.teamId),
-    cplPlayerRecords(captain.teamName),
+    cplPlayerRecords(captain.teamId),
   ]);
   const pairs = bestPairs(records);
   const players = rankPlayers(playerStats);
