@@ -7,7 +7,6 @@ import { PracticeUpload } from "@/components/PracticeUpload.tsx";
 import { deletePractice } from "./actions.ts";
 
 const FORMAT_LABEL = { mixed: "Mixed", womens: "Women's", mens: "Men's" } as const;
-const MIN_GAMES = 2;
 
 export default async function PracticePage() {
   const captain = await requireCaptain();
@@ -16,7 +15,7 @@ export default async function PracticePage() {
     pairRecords(captain.teamId),
     cplPlayerRecords(captain.teamId),
   ]);
-  const pairs = bestPairs(records);
+  const pairs = alphabeticalPairs(records);
   const players = rankPlayers(playerStats);
 
   return (
@@ -42,11 +41,11 @@ export default async function PracticePage() {
 
           <section className="card">
             <div className="card-head">
-              <h2>Best pairs</h2>
-              <span className="sub">League + practice, {MIN_GAMES}+ games, best first</span>
+              <h2>Pair records</h2>
+              <span className="sub">Every pair, league + practice, A–Z</span>
             </div>
             {pairs.length === 0 ? (
-              <p className="empty">No pairs with {MIN_GAMES}+ games yet.</p>
+              <p className="empty">No pairs yet.</p>
             ) : (
               <table className="table">
                 <thead>
@@ -152,11 +151,12 @@ function total(p: PairRecord): WinLoss {
   };
 }
 
-function bestPairs(pairs: PairRecord[]): PairRecord[] {
+/** Every pair, names A–Z within each pair, then pairs A–Z. */
+function alphabeticalPairs(pairs: PairRecord[]): PairRecord[] {
+  const byName = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: "base" });
   return pairs
-    .filter((p) => total(p).games >= MIN_GAMES)
-    .sort((x, y) => smoothedWinRate(total(y)) - smoothedWinRate(total(x)))
-    .slice(0, 15);
+    .map((p) => ({ ...p, players: [...p.players].sort(byName) as [string, string] }))
+    .sort((x, y) => byName(x.players[0], y.players[0]) || byName(x.players[1], y.players[1]));
 }
 
 /** Highest win percentage first; ties go to whoever has more wins. Players with no games go last. */
@@ -167,11 +167,6 @@ function rankPlayers(players: CplPlayerRecord[]): CplPlayerRecord[] {
 
 function winPct({ wins, losses }: CplPlayerRecord): string {
   return wins + losses === 0 ? "–" : `${Math.round((100 * wins) / (wins + losses))}%`;
-}
-
-/** Win rate pulled toward 50% for small samples, so 2–0 doesn't outrank 12–2. */
-function smoothedWinRate({ wins, games }: WinLoss): number {
-  return (wins + 1) / (games + 2);
 }
 
 function record({ games, wins }: WinLoss): string {
