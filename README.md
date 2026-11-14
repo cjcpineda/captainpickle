@@ -5,7 +5,7 @@ AI lineup strategist for **Cross Club Pickleball** captains. Captains sign in, s
 **What's here:**
 - **Schedule:** the next match (home/away, division, time, location) with its lineup deadline, upcoming matches, and past results with game-by-game lineups.
 - **Scouting report:** for the next opponent, their roster with records, the pairs they use most, their strongest players, and a button that asks the AI for counter-pairings.
-- **Practice:** upload practice games (any file; see below), check how they were read, then save. Shows your best pairs across league and practice.
+- **Practice:** upload practice games (any file; see below), check how they were read, then save. Lists every pair's record across league and practice, A–Z.
 - **AI Strategist:** a chat that reads all of the above from the database.
 
 CPL lineup deadlines: away teams submit two nights before the match, home teams the night before, always at 7:30 PM Eastern (`lib/deadline.ts`).
@@ -67,7 +67,7 @@ Keep each D1 binding in `wrangler.jsonc` local (no `"remote": true`). The AI bin
 | --- | --- |
 | Schedule page (next match, deadline, upcoming, results) | `app/(app)/page.tsx` |
 | Scouting report page | `app/(app)/scouting/page.tsx`, `lib/scouting.ts` |
-| Practice uploads and best pairs | `app/(app)/practice/`, `components/PracticeUpload.tsx`, `lib/practice.ts` |
+| Practice uploads and pair records | `app/(app)/practice/`, `components/PracticeUpload.tsx`, `lib/practice.ts` |
 | AI Strategist chat UI | `components/Chat.tsx`, `components/Strategist.tsx` |
 | Streaming chat endpoint (NDJSON) | `app/api/chat/route.ts` |
 | Agent loop: Workers AI plus tools, chats saved per captain | `lib/strategist/agent.ts` |
