@@ -267,6 +267,23 @@ export async function playerGames(playerId: number): Promise<PlayerGame[]> {
   });
 }
 
+/** One row per opponent per league game for each of the team's players. */
+export async function leagueOpponents(teamId: number): Promise<{ player: string; opponent: string; opponentTeam: string }[]> {
+  return all(
+    `WITH sides AS (
+         SELECT g.match_id, g.a1 AS p1, g.a2 AS p2, g.b1 AS o1, g.b2 AS o2 FROM games g
+         UNION ALL
+         SELECT g.match_id, g.b1, g.b2, g.a1, g.a2 FROM games g)
+       SELECT me.name AS player, opp.name AS opponent, t.name AS opponentTeam
+       FROM sides s
+       JOIN matches m ON m.id = s.match_id AND m.kind = 'league'
+       JOIN players me ON me.id IN (s.p1, s.p2) AND me.team_id = ?
+       JOIN players opp ON opp.id IN (s.o1, s.o2)
+       JOIN teams t ON t.id = opp.team_id`,
+    teamId,
+  );
+}
+
 /** Players in one division whose name matches: exact, then a whole first or last name, then any part. */
 export async function findPlayer(query: string, divisionId: string): Promise<Player[]> {
   const q = query.trim().toLowerCase();

@@ -1,7 +1,7 @@
 import { requireCaptain } from "@/lib/auth.ts";
 import { monthDay, weekday } from "@/lib/dates.ts";
-import { practiceSessions } from "@/lib/repo.ts";
-import { cplPlayerRecords, type CplPlayerRecord } from "@/lib/cpl.ts";
+import { leagueOpponents, practiceSessions } from "@/lib/repo.ts";
+import { cplPlayerRecords, divisionPlayerRecords, opponentStrength, type CplPlayerRecord } from "@/lib/cpl.ts";
 import { pairRecords, type PairRecord, type WinLoss } from "@/lib/scouting.ts";
 import { PracticeUpload } from "@/components/PracticeUpload.tsx";
 import { deletePractice } from "./actions.ts";
@@ -10,11 +10,14 @@ const FORMAT_LABEL = { mixed: "Mixed", womens: "Women's", mens: "Men's" } as con
 
 export default async function PracticePage() {
   const captain = await requireCaptain();
-  const [sessions, records, playerStats] = await Promise.all([
+  const [sessions, records, playerStats, faced, divisionRecords] = await Promise.all([
     practiceSessions(captain.teamId),
     pairRecords(captain.teamId),
     cplPlayerRecords(captain.teamId),
+    leagueOpponents(captain.teamId),
+    divisionPlayerRecords(captain.divisionId),
   ]);
+  const oppStrength = opponentStrength(faced, divisionRecords);
   const pairs = alphabeticalPairs(records);
   const players = rankPlayers(playerStats);
 
@@ -77,7 +80,7 @@ export default async function PracticePage() {
           <section className="card">
             <div className="card-head">
               <h2>Player records</h2>
-              <span className="sub">CPL league games, best first</span>
+              <span className="sub">CPL league games, best first · Opp. Win % = how strong their opponents were</span>
             </div>
             {players.length === 0 ? (
               <p className="empty">No records yet. Sync from CPL on the Schedule page to load them.</p>
@@ -89,6 +92,7 @@ export default async function PracticePage() {
                     <th>Player</th>
                     <th>W–L</th>
                     <th>Win %</th>
+                    <th title="Average season win % of the opponents they faced. Higher means tougher matchups.">Opp. Win %</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -102,6 +106,7 @@ export default async function PracticePage() {
                         {p.wins}–{p.losses}
                       </td>
                       <td className="num">{winPct(p)}</td>
+                      <td className="num">{pct(oppStrength.get(p.name.toLowerCase()))}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -167,6 +172,11 @@ function rankPlayers(players: CplPlayerRecord[]): CplPlayerRecord[] {
 
 function winPct({ wins, losses }: CplPlayerRecord): string {
   return wins + losses === 0 ? "–" : `${Math.round((100 * wins) / (wins + losses))}%`;
+}
+
+/** A 0–1 rate as a whole percent, or a dash when there is nothing to show. */
+function pct(rate: number | undefined): string {
+  return rate === undefined ? "–" : `${Math.round(100 * rate)}%`;
 }
 
 function record({ games, wins }: WinLoss): string {

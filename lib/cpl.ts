@@ -55,6 +55,12 @@ type CplPlayer = { firstName: string; lastName: string; gender: string; teamName
 /** A player's official CPL season record, as shown on crossclubpickleball.com/leagues/players. */
 export type CplPlayerRecord = { name: string; gender: Gender | null; wins: number; losses: number };
 
+/** The same record for any player in the division, with their team. */
+export type DivisionPlayerRecord = CplPlayerRecord & { team: string };
+
+/** One opponent one of our players faced in one league game. */
+export type FacedOpponent = { player: string; opponent: string; opponentTeam: string };
+
 type Region = { location: string; divisions: { divisionId: string; divisionName: string }[] };
 
 /** A CPL division, named the way the league site shows it ("NJ / PA 3.0"). */
@@ -85,14 +91,17 @@ export async function syncFromCpl(ourTeam: Team): Promise<SyncResult> {
     }));
   await replaceUpcomingFixtures({ ...ourTeam, division }, today, upcoming);
 
-  const roster = (await get<CplPlayer[]>(`/divisions/${divisionId}/players`)).filter((p) => p.teamName === team);
-  const records: CplPlayerRecord[] = roster.map((p) => ({
+  // Every player in the division: ours for the records table, everyone's to rate the opponents we faced.
+  const everyone: DivisionPlayerRecord[] = (await get<CplPlayer[]>(`/divisions/${divisionId}/players`)).map((p) => ({
     name: `${p.firstName} ${p.lastName}`.trim(),
+    team: p.teamName,
     gender: toGender(p.gender),
     wins: p.wins,
     losses: p.losses,
   }));
+  const records: CplPlayerRecord[] = everyone.filter((p) => p.team === team).map(({ team, ...p }) => p);
   await setMeta(playerRecordsKey(ourTeam.id), JSON.stringify(records));
+  await setMeta(divisionRecordsKey(divisionId), JSON.stringify(everyone));
 
   const scouted = new Set([team, ...upcoming.map((f) => f.opponent)]);
   const known = await importedCplIds();
@@ -126,6 +135,33 @@ export async function cplPlayerRecords(teamId: number): Promise<CplPlayerRecord[
 }
 
 const playerRecordsKey = (teamId: number) => `cpl_player_records:${teamId}`;
+
+/** Every player's CPL season record in a division, from the last sync. */
+export async function divisionPlayerRecords(divisionId: string): Promise<DivisionPlayerRecord[]> {
+  const saved = await getMeta(divisionRecordsKey(divisionId));
+  return saved ? (JSON.parse(saved) as DivisionPlayerRecord[]) : [];
+}
+
+const divisionRecordsKey = (divisionId: string) => `cpl_division_records:${divisionId}`;
+
+/**
+ * Strength of schedule: for each of our players, the average season win rate of the opponents
+ * they faced in league games (0–1). Higher means they were sent out against tougher pairs.
+ * Keyed by lower-case player name. Opponents with no record on file are skipped.
+ */
+export function opponentStrength(faced: FacedOpponent[], records: DivisionPlayerRecord[]): Map<string, number> {
+  const rateOf = new Map(
+    records.filter((r) => r.wins + r.losses > 0).map((r) => [`${r.team}|${r.name}`.toLowerCase(), r.wins / (r.wins + r.losses)]),
+  );
+  const rates = Map.groupBy(
+    faced.flatMap((f) => {
+      const rate = rateOf.get(`${f.opponentTeam}|${f.opponent}`.toLowerCase());
+      return rate === undefined ? [] : [{ player: f.player, rate }];
+    }),
+    (f) => f.player.toLowerCase(),
+  );
+  return new Map([...rates].map(([player, list]) => [player, list.reduce((sum, f) => sum + f.rate, 0) / list.length]));
+}
 
 function toMatch(m: Matchup, detail: MatchupDetail, divisionId: string): MatchInput {
   const teamName = (teamId: string) => (teamId === detail.matchup.homeTeamId ? m.homeName : m.awayName);
