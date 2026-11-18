@@ -80,9 +80,9 @@ The strategist runs on Cloudflare Workers AI (`lib/ai.ts`), through the Worker's
 
 ## Data from CPL
 
-crossclubpickleball.com is a single-page app backed by a public, read-only JSON API. The sync (`lib/cpl.ts`) reads the same data the Lineups page shows:
+crossclubpickleball.com is a single-page app backed by a public, read-only JSON API. The sync (`lib/cpl.ts`) reads the same data the Lineups and Playoffs pages show:
 
-- **Schedule:** every upcoming match for each captain's team, with date, time, home/away and address.
+- **Schedule:** every upcoming match for each captain's team, with date, time, home/away and address. Playoff games come from the bracket (`matchups?playoffs=true`); a later round shows up once the league sets it, after the previous round is played.
 - **Match sheets:** every completed match involving your team or one of your upcoming opponents, game by game, with each player's gender.
 
 A match is downloaded once and never re-fetched, so routine syncs make only a couple of requests. Forfeited games (no players listed) are skipped.

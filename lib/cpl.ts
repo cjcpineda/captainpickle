@@ -2,8 +2,8 @@
  * Cross Club Pickleball League sync.
  *
  * crossclubpickleball.com is a single-page app; its data comes from a public, read-only JSON API
- * (the same requests a browser makes when you open the Lineups page). We pull:
- *   - our upcoming schedule, which becomes the fixtures table, and
+ * (the same requests a browser makes when you open the Lineups and Playoffs pages). We pull:
+ *   - our upcoming schedule, regular season and playoff bracket alike, which becomes the fixtures table, and
  *   - every completed match involving us or an upcoming opponent, game by game, for scouting, and
  *   - our players' official season records from the league's Players page.
  * Matches already imported are never fetched again, so routine syncs make only a few requests.
@@ -75,7 +75,7 @@ export async function syncFromCpl(ourTeam: Team): Promise<SyncResult> {
   if (!division) throw new Error(`CPL division ${divisionId} not found.`);
   if (division !== ourTeam.division) await upsertTeam(team, divisionId, division);
 
-  const matchups = await get<Matchup[]>(`/divisions/${divisionId}/matchups`);
+  const matchups = await divisionMatchups(divisionId);
   const ours = matchups.filter((m) => m.homeName === team || m.awayName === team);
   const today = leagueToday();
 
@@ -124,6 +124,19 @@ export async function syncFromCpl(ourTeam: Team): Promise<SyncResult> {
 
   await setMeta("cpl_synced_at", new Date().toISOString());
   return { division, fixtures: upcoming.length, imported: toImport.length };
+}
+
+/**
+ * Every matchup in a division: the regular season plus the playoff bracket. The league lists
+ * playoff games separately (what its Playoffs page reads); later rounds appear once they're set.
+ */
+async function divisionMatchups(divisionId: string): Promise<Matchup[]> {
+  const [season, playoffs] = await Promise.all([
+    get<Matchup[]>(`/divisions/${divisionId}/matchups`),
+    get<Matchup[]>(`/divisions/${divisionId}/matchups?playoffs=true`),
+  ]);
+  const seen = new Set(season.map((m) => m.matchupId));
+  return [...season, ...playoffs.filter((m) => !seen.has(m.matchupId))];
 }
 
 export const lastSyncedAt = () => getMeta("cpl_synced_at");
